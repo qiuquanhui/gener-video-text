@@ -14,3 +14,6 @@ downloads/*
 # 本地私密文件（阶段4：LLM Key 与可选 B 站 Cookie，绝不入库）
 backend/local_config.py
 backend/cookies.txt
+
+# ZCode 会话产物
+.zcode/
