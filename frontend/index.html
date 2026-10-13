@@ -50,6 +50,18 @@
             <span v-else class="loading-dot"><i></i><i></i><i></i></span>
           </button>
         </div>
+        <div class="quick-actions">
+          <button class="btn btn-outline" @click="extractText" :disabled="parsing || textLoading || !url.trim()">
+            <span v-if="!textLoading">📝 提取视频文本</span>
+            <span v-else class="loading-dot"><i></i><i></i><i></i></span>
+          </button>
+          <button class="btn btn-primary" @click="onSummarizeClick" :disabled="parsing || textLoading || sumLoading || !url.trim()">
+            <span v-if="!sumLoading">✨ AI 总结</span>
+            <span v-else class="loading-dot"><i></i><i></i><i></i></span>
+          </button>
+        </div>
+        <p class="auto-analysis-note">解析成功后自动提取并展示视频文本；点击「AI 总结」后生成总结和思维导图。</p>
+        <p class="privacy-note">不会读取或上传你的 B 站 Cookie。没有公开字幕时会尝试本机 Whisper 转写，音频不上传；使用 AI 时，文本和标题会发送给已配置的服务商，问答转写在内存保留 60 分钟。</p>
         <p class="search-tip" v-if="parsing">正在解析，通常需要几秒钟，请稍候…</p>
 
         <div class="platforms">
@@ -97,7 +109,7 @@
                 <span v-if="!textLoading">📝 提取文本</span>
                 <span v-else class="loading-dot"><i></i><i></i><i></i></span>
               </button>
-              <button class="btn btn-outline btn-lg btn-vip" @click="onSummarizeClick" :disabled="sumLoading">
+              <button class="btn btn-outline btn-lg btn-vip" @click="onSummarizeClick" :disabled="textLoading || sumLoading">
                 <span v-if="!sumLoading">✨ AI 总结 <small>免费</small></span>
                 <span v-else class="loading-dot"><i></i><i></i><i></i></span>
               </button>
@@ -127,6 +139,92 @@
           <p class="file-hint">📁 文件在服务器保留 2 小时，下载完成后请及时保存到本地</p>
           <p class="error-hint" v-if="dl.status === 'error'">⚠ {{ dl.error || '下载失败，请重试' }}</p>
         </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ 自动分析结果 ═══════════ -->
+    <section class="container analysis-section" id="analysis" v-if="analysis.url" :aria-busy="textLoading || sumLoading">
+      <div class="analysis-heading">
+        <div>
+          <h2>视频内容分析</h2>
+          <p>{{ textResult.title || videoInfo?.title || '正在处理视频内容' }}</p>
+        </div>
+        <button v-if="analysis.status === 'error'" class="btn btn-outline btn-sm" @click="retryAnalysis" :disabled="textLoading || sumLoading">
+          {{ textResult.text && analysis.summaryRequested ? '重试 AI 总结和导图' : '重试提取文本' }}
+        </button>
+      </div>
+      <div class="analysis-grid" :class="{ 'text-only': !analysis.summaryRequested }">
+        <article class="card analysis-card">
+          <div class="analysis-card-head">
+            <h3>📝 提取文本</h3>
+            <span v-if="analysis.textStatus === 'done'" class="analysis-done">{{ textResult.chars }} 字 · 已完成</span>
+          </div>
+          <div v-if="textLoading" class="analysis-placeholder" role="status">
+            <span class="loading-dot"><i></i><i></i><i></i></span>
+            {{ analysis.textStatus === 'extracting' ? '正在提取字幕或转写语音…' : '等待提取文本…' }}
+            <p>没有公开字幕时会尝试语音转写，处理时间可能较长。</p>
+          </div>
+          <p v-else-if="analysis.textError" class="error-hint" role="alert">{{ analysis.textError }}</p>
+          <template v-else-if="textResult.text">
+            <div class="text-content analysis-transcript">{{ textResult.text }}</div>
+            <div class="analysis-actions">
+              <button class="btn btn-outline btn-sm" @click="copyText">📋 复制文本</button>
+              <button class="btn btn-outline btn-sm" @click="downloadTxt">⬇ .txt</button>
+              <button class="btn btn-primary btn-sm" @click="onSummarizeClick" :disabled="sumLoading">✨ {{ sumResult.summary ? '查看 AI 总结' : 'AI 总结' }}</button>
+            </div>
+          </template>
+        </article>
+        <article class="card analysis-card" v-if="analysis.summaryRequested">
+          <div class="analysis-card-head">
+            <h3>✨ AI 总结</h3>
+            <span v-if="analysis.summaryStatus === 'done'" class="analysis-done">已完成</span>
+          </div>
+          <div v-if="sumLoading" class="analysis-placeholder" role="status">
+            <span class="loading-dot"><i></i><i></i><i></i></span>
+            {{ analysis.summaryStatus === 'generating' ? '正在生成 AI 总结和思维导图…' : '等待生成 AI 总结和思维导图…' }}
+          </div>
+          <p v-else-if="analysis.summaryError" class="error-hint" role="alert">{{ analysis.summaryError }}</p>
+          <template v-else-if="sumResult.summary">
+            <div class="sum-summary-card"><p>{{ sumResult.summary }}</p></div>
+            <div class="sum-keywords" v-if="sumResult.keywords.length">
+              <span class="kw-chip" v-for="k in sumResult.keywords" :key="k">{{ k }}</span>
+            </div>
+            <div class="sum-section-title">📋 章节要点</div>
+            <div class="sum-chapters analysis-chapters">
+              <div class="sum-chapter" v-for="(c, i) in sumResult.chapters" :key="i">
+                <div class="sum-ch-head">
+                  <button class="ts-btn" @click="copyTs(c.start)" title="复制时间点">[{{ formatDuration(c.start) }}]</button>
+                  <b>{{ c.title }}</b>
+                </div>
+                <ul class="sum-points"><li v-for="(p, j) in c.points" :key="j">{{ p }}</li></ul>
+              </div>
+            </div>
+            <div class="analysis-actions">
+              <button class="btn btn-outline btn-sm" @click="copySummary">📋 复制总结</button>
+              <button class="btn btn-outline btn-sm" @click="downloadSummary('md')">⬇ .md</button>
+              <button class="btn btn-primary btn-sm" @click="showSumModal = true">💬 向视频提问</button>
+            </div>
+          </template>
+        </article>
+        <article class="card analysis-card analysis-mindmap" v-if="analysis.summaryRequested">
+          <div class="analysis-card-head">
+            <h3>🧠 思维导图</h3>
+            <span v-if="analysis.summaryStatus === 'done'" class="analysis-done">已完成 · 点击节点可折叠</span>
+          </div>
+          <div v-if="sumLoading" class="analysis-placeholder" role="status">正在等待 AI 生成思维导图…</div>
+          <p v-else-if="analysis.summaryError" class="error-hint">{{ analysis.summaryError }}</p>
+          <div v-else-if="mm.nodes.length" class="mindmap-wrap">
+            <svg :viewBox="mm.viewBox" :style="{ width: mm.width + 'px', height: mm.height + 'px' }" role="img" aria-label="视频内容思维导图">
+              <path v-for="(l, i) in mm.links" :key="'l' + i" class="mm-link" :d="l.d"/>
+              <g v-for="n in mm.nodes" :key="'n' + n.id" class="mm-node"
+                 :class="'depth' + n.depth" :transform="`translate(${n.x}, ${n.y})`" @click="toggleMmNode(n)">
+                <rect x="0" y="-17" :width="n.w" height="34" rx="8"/>
+                <text x="12" y="5">{{ n.label }}</text>
+                <text v-if="n.childCount" class="mm-fold" :x="n.w - 16" y="5">{{ n.collapsed ? '+' : '−' }}</text>
+              </g>
+            </svg>
+          </div>
+        </article>
       </div>
     </section>
 
@@ -264,6 +362,11 @@
 
         <div class="sum-summary-card"><p>{{ sumResult.summary }}</p></div>
 
+        <details class="transcript-details">
+          <summary>查看提取的完整文本（{{ sumResult.chars }} 字）</summary>
+          <pre class="transcript-content">{{ sumResult.transcript }}</pre>
+        </details>
+
         <div class="sum-keywords" v-if="sumResult.keywords.length">
           <span class="kw-chip" v-for="k in sumResult.keywords" :key="k">{{ k }}</span>
         </div>
@@ -283,7 +386,7 @@
 
         <div class="sum-section-title">🧠 思维导图（点击节点可折叠）</div>
         <div class="mindmap-wrap">
-          <svg :viewBox="mm.viewBox" :style="{ width: mm.width + 'px' }">
+          <svg :viewBox="mm.viewBox" :style="{ width: mm.width + 'px', height: mm.height + 'px' }">
             <path v-for="(l, i) in mm.links" :key="'l' + i" class="mm-link" :d="l.d"/>
             <g v-for="n in mm.nodes" :key="'n' + n.id" class="mm-node"
                :class="'depth' + n.depth" :transform="`translate(${n.x}, ${n.y})`" @click="toggleMmNode(n)">

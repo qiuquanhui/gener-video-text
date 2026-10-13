@@ -4,14 +4,12 @@
 供 summarizer 生成「带时间戳章节要点」。开闭原则：本模块独立实现子进程
 调用与 srt/vtt 解析，仅 import 复用既有模块的常量与工具，不修改任何现有代码。
 
-可选 Cookie：存在 backend/cookies.txt（Netscape 格式，gitignored）时自动附加
---cookies。背景：B 站所有字幕（CC/AI）被平台服务端登录墙锁定（SESSDATA），
-匿名不可得（yt-dlp 源码 need_login_subtitle 分支 + 0/40 实测，详见
-docs/方案设计-AI视频总结.md §1.1）；用户放置自己浏览器导出的 Cookie 是唯一
-免费解锁方式（亦使腾讯视频等匿名字幕平台更稳定）。
+隐私：本链路不读取浏览器 Cookie，也不读取 backend/cookies.txt。字幕请求不发送
+任何 Cookie；没有公开字幕时，可选本机 Whisper 从匿名音频流转写。
 """
 import asyncio
 import html
+import os
 import re
 import shutil
 import uuid
@@ -19,21 +17,13 @@ from pathlib import Path
 
 import config
 import douyin
-from downloader import YT_DLP, BusinessError, browser_args
+from downloader import YT_DLP, BusinessError, subtitle_browser_args
+from local_transcriber import transcribe_url
 from text_extractor import TAG_RE, _lang_score
-
-COOKIE_FILE = config.BASE_DIR / "backend" / "cookies.txt"
 
 CUE_TS_RE = re.compile(
     r"((?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{3})\s*-->\s*((?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{3})"
 )
-
-
-def cookie_args() -> list:
-    """仅当用户放置了 cookies.txt 才启用；只作用于本字幕链路，不碰下载管线。"""
-    if COOKIE_FILE.is_file():
-        return ["--cookies", str(COOKIE_FILE)]
-    return []
 
 
 def _ts_to_seconds(ts: str) -> float:
@@ -83,7 +73,7 @@ async def extract_cues(url: str) -> dict:
     workdir = config.DOWNLOAD_DIR / "subs" / uuid.uuid4().hex
     workdir.mkdir(parents=True, exist_ok=True)
     args = [
-        *YT_DLP, "--skip-download",
+        *YT_DLP, "--ignore-config", "--skip-download",
         "--write-subs", "--write-auto-subs",
         "--sub-langs", "zh.*,zh-Hans,zh,en",
         "--sub-format", "srt/vtt",
@@ -92,12 +82,13 @@ async def extract_cues(url: str) -> dict:
         # after_move:title 在 --skip-download 下不输出；普通字段 print 会隐含
         # simulate 导致字幕不落盘，必须显式 --no-simulate
         "--print", "title", "--no-simulate",
-        *browser_args(url), *cookie_args(),
+        *subtitle_browser_args(url),
         url,
     ]
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         )
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout=config.EXTRACT_TIMEOUT_SECONDS)
@@ -116,10 +107,14 @@ async def extract_cues(url: str) -> dict:
             key=lambda f: _lang_score(f.name), reverse=True,
         )
         if not sub_files:
-            raise BusinessError(
-                "该视频没有可用字幕（平台未提供或需要登录）。"
-                "B 站所有字幕均需登录后可见：可将浏览器导出的 Cookie 放到 backend/cookies.txt 解锁"
-            )
+            asr = await transcribe_url(url, workdir)
+            cues = asr["cues"]
+            return {
+                "title": title,
+                "lang": "zh-asr",
+                "chars": len(asr["text"]),
+                "cues": cues,
+            }
 
         sub = sub_files[0]
         parts = sub.name.split(".")

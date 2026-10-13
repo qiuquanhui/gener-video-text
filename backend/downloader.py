@@ -37,6 +37,13 @@ def browser_args(url: str) -> list:
         ]
     return []
 
+
+def subtitle_browser_args(url: str) -> list:
+    """字幕请求只带 UA/Referer，明确不发送任何 Cookie。"""
+    if "bilibili.com" in url or "b23.tv" in url:
+        return ["--user-agent", CHROME_UA, "--referer", "https://www.bilibili.com/"]
+    return []
+
 PROGRESS_RE = re.compile(
     r"\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+\w+)"
     r"(?:\s+at\s+((?:[\d.]+\w+/s)|Unknown\s*B/s))?"

@@ -66,14 +66,18 @@ def _get_session(session_id: str) -> dict:
 
 # ---------- GLM 调用 ----------
 
-def _chat(messages: list[dict]) -> str:
+def _chat(messages: list[dict], json_mode: bool = False) -> str:
     s = get_llm_settings()
-    body = json.dumps({
+    payload = {
         "model": s["LLM_MODEL"],
         "messages": messages,
         "temperature": 0.3,
         "max_tokens": s["LLM_MAX_TOKENS"],
-    }).encode("utf-8")
+    }
+    # DeepSeek OpenAI-compatible endpoint supports constrained JSON output.
+    if json_mode and "api.deepseek.com" in s["LLM_BASE_URL"].lower():
+        payload["response_format"] = {"type": "json_object"}
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         s["LLM_BASE_URL"].rstrip("/") + "/chat/completions",
         data=body,
@@ -176,6 +180,20 @@ def _norm_str_list(v, limit, maxlen) -> list[str]:
     return [str(x).strip()[:maxlen] for x in v if str(x).strip()][:limit]
 
 
+def _normalize_mindmap(node, depth=0):
+    if not isinstance(node, dict):
+        return None
+    label = str(node.get("label") or "").strip()[:12]
+    if not label:
+        return None
+    result = {"label": label}
+    children = node.get("children")
+    if depth < 2 and isinstance(children, list):
+        normalized = [_normalize_mindmap(child, depth + 1) for child in children[:8]]
+        result["children"] = [child for child in normalized if child]
+    return result
+
+
 def _normalize_summary(data: dict, fallback_title: str) -> dict:
     chapters_raw = data.get("chapters")
     if not isinstance(chapters_raw, list):
@@ -197,9 +215,15 @@ def _normalize_summary(data: dict, fallback_title: str) -> dict:
         raise ValueError("no valid chapters")
     chapters.sort(key=lambda c: c["start"])
 
-    mindmap = data.get("mindmap")
-    if not (isinstance(mindmap, dict) and str(mindmap.get("label") or "").strip()):
-        mindmap = None
+    mindmap = _normalize_mindmap(data.get("mindmap"))
+    if not mindmap or not mindmap.get("children"):
+        mindmap = {
+            "label": fallback_title[:12] or "视频主题",
+            "children": [
+                {"label": ch["title"][:12], "children": [{"label": p[:12]} for p in ch["points"]]}
+                for ch in chapters
+            ],
+        }
 
     return {
         "summary": str(data.get("summary") or "").strip()[:300] or "（模型未返回摘要）",
@@ -227,7 +251,7 @@ def summarize(meta: dict) -> dict:
 
     last_err = None
     for attempt in range(2):
-        raw = _chat(messages)
+        raw = _chat(messages, json_mode=True)
         try:
             result = _normalize_summary(_extract_json(raw), meta["title"])
             break
@@ -247,6 +271,7 @@ def summarize(meta: dict) -> dict:
         "title": meta["title"],
         "lang": meta.get("lang"),
         "chars": meta["chars"],
+        "transcript": "\n".join(c["text"] for c in meta["cues"]),
         "elapsed": round(time.time() - t0, 1),
         "model": settings["LLM_MODEL"],
     })

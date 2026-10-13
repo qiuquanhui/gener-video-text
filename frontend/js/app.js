@@ -23,14 +23,14 @@ const app = createApp({
       { icon: "📱", title: "全端适配", desc: "手机、平板、电脑浏览器直接用，无需装 App" },
       { icon: "🆓", title: "完全免费", desc: "不限次数、不限清晰度、无需注册登录" },
       { icon: "🌐", title: "海量平台", desc: "基于 yt-dlp 引擎，支持 1800+ 视频网站" },
-      { icon: "🔒", title: "隐私安全", desc: "文件 2 小时自动清理，不留存任何个人数据" },
+      { icon: "🔒", title: "隐私安全", desc: "字幕链路不读取 Cookie；问答转写仅在内存临时保留" },
       { icon: "✨", title: "AI 视频总结", desc: "摘要+时间戳章节+思维导图+追问问答，快速吃透长视频" },
     ];
     const faqs = [
       { q: "支持哪些平台？", a: "基于 yt-dlp 开源引擎，支持哔哩哔哩、抖音、快手、微博、YouTube、Instagram、TikTok 等 1800+ 网站；少数平台（如小红书）暂不支持。" },
       { q: "真的是完全免费吗？", a: "是。视频下载与文本提取不限次数、不限清晰度、无需登录；AI 总结与 AI 问答当前限时免费开放（每分钟 3 次）。" },
       { q: "下载的文件会保存多久？", a: "文件在服务器临时保留 2 小时后自动删除，请下载完成后及时保存到本地设备。" },
-      { q: "为什么有些视频解析失败？", a: "常见原因：链接无效、平台限制需要登录、内容为私有或地域受限。需要登录的内容（如 B 站 1080P+ 部分）计划二期支持 Cookie。" },
+      { q: "为什么提取不到 B 站字幕？", a: "本工具为了保护隐私，不读取浏览器或本机 Cookie。只有平台公开可访问的字幕能直接提取；若该视频字幕要求登录，目前无法提取。使用 AI 总结时，字幕文本和视频标题会发送给本项目配置的 AI 服务商。" },
       { q: "手机上怎么保存视频？", a: "点击\"保存文件\"后浏览器会直接下载；iOS 可在\"文件\"App 中查看，安卓在下载目录查看，也可保存到相册。" },
       { q: "如何开通会员？", a: "当前为模拟支付阶段：点击定价区\"立即开通会员\"，模拟支付成功或输入激活码（如 VIP2026）即可体验会员流程，正式支付将在后续版本接入。" },
     ];
@@ -52,6 +52,13 @@ const app = createApp({
     const textLoading = ref(false);
     const textResult = reactive({ title: "", text: "", chars: 0, lang: "" });
     const showTextModal = ref(false);
+    const analysis = reactive({
+      taskId: "", url: "", status: "", textStatus: "", summaryStatus: "",
+      textError: "", summaryError: "", summaryRequested: false,
+    });
+    let analysisTimer = null;
+    let analysisVersion = 0;
+    let parsedInput = "";
 
     const showPayModal = ref(false);
     const payTab = ref("wechat");
@@ -78,7 +85,11 @@ const app = createApp({
         : {};
       const r = await fetch(path, opts);
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.detail || `请求失败（${r.status}）`);
+      if (!r.ok) {
+        const error = new Error(d.detail || `请求失败（${r.status}）`);
+        error.status = r.status;
+        throw error;
+      }
       return d;
     }
     function formatDuration(sec) {
@@ -97,18 +108,27 @@ const app = createApp({
 
     /* ---------- 核心业务：解析 ---------- */
     async function parseVideo() {
+      if (parsing.value) return;
       const u = url.value.trim();
       if (!u) { toast("请先粘贴视频链接", "error"); return; }
       if (!/^https?:\/\//.test(u)) { toast("链接需以 http(s):// 开头", "error"); return; }
       parsing.value = true;
       stopPoll();
       resetDl();
+      resetAnalysis();
+      const version = analysisVersion;
+      videoInfo.value = null;
+      parsedInput = "";
       try {
         const info = await api("/api/parse", { url: u });
+        if (version !== analysisVersion) return;
         videoInfo.value = info;
+        parsedInput = u;
         const q = info.qualities.find(x => x.value === "1080") || info.qualities[0];
         selectedQuality.value = q ? q.value : "";
         scrollTo("#result");
+        // 解析后只提取文本；总结和导图由用户点击 AI 总结后触发。
+        startAnalysis(info.webpage_url || u, version);
       } catch (e) {
         toast(e.message, "error");
       } finally {
@@ -165,18 +185,21 @@ const app = createApp({
 
     /* ---------- 核心业务：文本提取 ---------- */
     async function extractText() {
-      textLoading.value = true;
-      try {
-        const r = await api("/api/extract-text", {
-          url: videoInfo.value?.webpage_url || url.value.trim(),
-        });
-        Object.assign(textResult, r);
+      if (parsing.value) return;
+      const u = currentSource();
+      if (analysis.url === u && textResult.text) {
         showTextModal.value = true;
-      } catch (e) {
-        toast(e.message, "error");
-      } finally {
-        textLoading.value = false;
+        return;
       }
+      if (!u) { toast("请先粘贴视频链接", "error"); return; }
+      if (analysis.url === u) {
+        if (analysis.status === "error") await retryAnalysis();
+      } else {
+        resetAnalysis();
+        videoInfo.value = null;
+        await startAnalysis(u);
+      }
+      scrollTo("#analysis");
     }
     async function copyText() {
       try {
@@ -219,40 +242,165 @@ const app = createApp({
       vipCode.value = "";
       toast("激活成功，欢迎加入会员 👑", "success");
     }
-    function onSummarizeClick() { doSummarize(); }
+    function onSummarizeClick() { return doSummarize(); }
 
     /* ---------- 阶段4：AI 总结 + AI 问答 + 思维导图 ---------- */
     const sumLoading = ref(false);
     const showSumModal = ref(false);
     const sumResult = reactive({
       sessionId: "", title: "", chars: 0, model: "", elapsed: 0,
-      summary: "", chapters: [], keywords: [], mindmap: null,
+      summary: "", transcript: "", chapters: [], keywords: [], mindmap: null,
     });
-    const mm = reactive({ viewBox: "0 0 640 160", width: 640, nodes: [], links: [] });
+    const mm = reactive({ viewBox: "0 0 640 160", width: 640, height: 160, nodes: [], links: [] });
     const qaMessages = reactive([]);
     const qaInput = ref("");
     const qaLoading = ref(false);
 
-    async function doSummarize() {
-      const u = videoInfo.value?.webpage_url || url.value.trim();
-      if (!u) { toast("请先解析视频链接", "error"); return; }
-      if (sumLoading.value) return;
-      sumLoading.value = true;
-      try {
-        const r = await api("/api/summarize", { url: u });
-        Object.assign(sumResult, r);
-        sumResult.sessionId = r.session_id || "";  // 后端 snake_case 映射
-        qaMessages.splice(0, qaMessages.length);
-        qaInput.value = "";
+    function currentSource() {
+      return videoInfo.value && url.value.trim() === parsedInput
+        ? videoInfo.value.webpage_url || parsedInput : url.value.trim();
+    }
+
+    function resetAnalysis() {
+      analysisVersion++;
+      clearTimeout(analysisTimer);
+      analysisTimer = null;
+      Object.assign(analysis, {
+        taskId: "", url: "", status: "", textStatus: "", summaryStatus: "",
+        textError: "", summaryError: "", summaryRequested: false,
+      });
+      Object.assign(textResult, { title: "", text: "", chars: 0, lang: "" });
+      Object.assign(sumResult, {
+        sessionId: "", title: "", chars: 0, model: "", elapsed: 0,
+        summary: "", transcript: "", chapters: [], keywords: [], mindmap: null,
+      });
+      Object.assign(mm, { viewBox: "0 0 640 160", width: 640, height: 160, nodes: [], links: [] });
+      textLoading.value = false;
+      sumLoading.value = false;
+      showTextModal.value = false;
+      showSumModal.value = false;
+      qaMessages.splice(0, qaMessages.length);
+      qaInput.value = "";
+      qaLoading.value = false;
+    }
+
+    function applyAnalysis(task) {
+      Object.assign(analysis, {
+        taskId: task.task_id, status: task.status,
+        textStatus: task.text_status, summaryStatus: task.summary_status,
+        textError: task.text_error || "", summaryError: task.summary_error || "",
+        summaryRequested: !!task.summary_requested,
+      });
+      textLoading.value = ["pending", "extracting"].includes(task.text_status);
+      sumLoading.value = ["pending", "generating"].includes(task.summary_status);
+      if (task.text_result) Object.assign(textResult, task.text_result);
+      if (task.summary_result && !sumResult.summary) {
+        Object.assign(sumResult, task.summary_result);
+        sumResult.sessionId = task.summary_result.session_id || "";
         ensureMindmap();
-        showSumModal.value = true;
-        setTimeout(layoutMindmap, 80);
-        toast("AI 总结完成，可继续向视频提问 ✨", "success");
-      } catch (e) {
-        toast(e.message, "error");
-      } finally {
-        sumLoading.value = false;
+        layoutMindmap();
+        toast("文本、AI 总结和思维导图已生成 ✨", "success");
       }
+    }
+
+    function scheduleAnalysisPoll(version, taskId) {
+      clearTimeout(analysisTimer);
+      analysisTimer = setTimeout(async () => {
+        if (version !== analysisVersion || taskId !== analysis.taskId) return;
+        try {
+          const task = await api(`/api/analysis/${taskId}`);
+          if (version !== analysisVersion || taskId !== analysis.taskId) return;
+          applyAnalysis(task);
+          if (!["done", "error"].includes(task.status)) scheduleAnalysisPoll(version, taskId);
+        } catch (e) {
+          if (version !== analysisVersion) return;
+          failAnalysis(e.message);
+        }
+      }, 800);
+    }
+
+    function failAnalysis(message) {
+      analysis.status = "error";
+      if (!textResult.text) {
+        analysis.textStatus = "error";
+        analysis.textError = message;
+      }
+      analysis.summaryStatus = analysis.summaryRequested ? "error" : "idle";
+      analysis.summaryError = analysis.summaryRequested ? message : "";
+      textLoading.value = false;
+      sumLoading.value = false;
+    }
+
+    async function startAnalysis(u, version = analysisVersion, includeSummary = false) {
+      Object.assign(analysis, {
+        url: u, status: "queued", textStatus: "pending",
+        summaryStatus: includeSummary ? "pending" : "idle", summaryRequested: includeSummary,
+      });
+      textLoading.value = true;
+      sumLoading.value = includeSummary;
+      try {
+        const task = await api("/api/analyze", { url: u, include_summary: includeSummary });
+        if (version !== analysisVersion) return;
+        applyAnalysis(task);
+        if (!["done", "error"].includes(task.status)) scheduleAnalysisPoll(version, task.task_id);
+      } catch (e) {
+        if (version === analysisVersion) failAnalysis(e.message);
+      }
+    }
+
+    async function retryAnalysis() {
+      if (textLoading.value || sumLoading.value || !analysis.url) return;
+      if (!analysis.taskId) return startAnalysis(analysis.url, analysisVersion, analysis.summaryRequested);
+      const version = analysisVersion;
+      textLoading.value = !textResult.text;
+      sumLoading.value = analysis.summaryRequested;
+      analysis.textError = "";
+      analysis.summaryError = "";
+      try {
+        const task = await api(`/api/analysis/${analysis.taskId}/retry`, {});
+        if (version !== analysisVersion) return;
+        applyAnalysis(task);
+        if (!["done", "error"].includes(task.status)) scheduleAnalysisPoll(version, task.task_id);
+      } catch (e) {
+        if (version !== analysisVersion) return;
+        if (e.status === 404) await startAnalysis(analysis.url, version, analysis.summaryRequested);
+        else failAnalysis(e.message);
+      }
+    }
+
+    async function doSummarize() {
+      if (parsing.value) return;
+      const u = currentSource();
+      if (!u) { toast("请先粘贴视频链接", "error"); return; }
+      if (analysis.url === u) {
+        if (sumResult.summary) { showSumModal.value = true; return; }
+        if (sumLoading.value || textLoading.value) return;
+        if (analysis.summaryRequested && analysis.status === "error") {
+          await retryAnalysis();
+        } else if (analysis.taskId) {
+          const version = analysisVersion;
+          analysis.summaryRequested = true;
+          analysis.summaryStatus = "pending";
+          sumLoading.value = true;
+          try {
+            const task = await api(`/api/analysis/${analysis.taskId}/summarize`, {});
+            if (version !== analysisVersion) return;
+            applyAnalysis(task);
+            if (!["done", "error"].includes(task.status)) scheduleAnalysisPoll(version, task.task_id);
+          } catch (e) {
+            if (version !== analysisVersion) return;
+            if (e.status === 404) await startAnalysis(u, version, true);
+            else failAnalysis(e.message);
+          }
+        } else {
+          await startAnalysis(u, analysisVersion, true);
+        }
+      } else {
+        resetAnalysis();
+        videoInfo.value = null;
+        await startAnalysis(u, analysisVersion, true);
+      }
+      scrollTo("#analysis");
     }
 
     function ensureMindmap() {
@@ -297,6 +445,7 @@ const app = createApp({
       const width = PADX * 2 + Math.min(maxDepth, 4) * (W + 28) + W;
       mm.viewBox = `0 0 ${width} ${height}`;
       mm.width = width;
+      mm.height = height;
       mm.nodes = nodes;
       mm.links = links.map(l => {
         const a = nodes[l.from], b = nodes[l.to];
@@ -319,14 +468,17 @@ const app = createApp({
       qaInput.value = "";
       qaMessages.push({ role: "user", content: q });
       qaLoading.value = true;
+      const version = analysisVersion;
       try {
         const history = qaMessages.slice(0, -1).slice(-6).map(m => ({ role: m.role, content: m.content }));
         const r = await api("/api/qa", { session_id: sumResult.sessionId, question: q, history });
+        if (version !== analysisVersion) return;
         qaMessages.push({ role: "assistant", content: r.answer });
       } catch (e) {
+        if (version !== analysisVersion) return;
         qaMessages.push({ role: "assistant", content: "⚠ " + e.message });
       } finally {
-        qaLoading.value = false;
+        if (version === analysisVersion) qaLoading.value = false;
         setTimeout(() => {
           const el = document.querySelector(".sum-modal .qa-list");
           if (el) el.scrollTop = el.scrollHeight;
@@ -394,7 +546,7 @@ const app = createApp({
     return {
       platforms, features, faqs,
       url, parsing, videoInfo, selectedQuality, resultSection, openFaq,
-      dl, textLoading, textResult, showTextModal,
+      dl, textLoading, textResult, showTextModal, analysis, retryAnalysis,
       showPayModal, payTab, vipCode, isVip, toasts,
       parseVideo, startDownload, resetDownload, extractText, copyText, downloadTxt,
       openPay, mockPaySuccess, activateVip, onSummarizeClick,

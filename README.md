@@ -32,8 +32,9 @@ python -m venv .venv
 | 视频下载 | 服务器下载合并 mp4 / 提取 MP3，实时进度（速度/ETA），文件保留 2 小时 | ✅ |
 | 抖音免 Cookie | 个人主页弹窗链 / 视频链 / `v.douyin.com` 短链均可解析，**无水印 720P + MP3**，全程无需任何 Cookie | ✅ |
 | 文本提取 | 一键提取视频字幕/自动字幕为纯文本，可复制/下载 .txt | ✅ |
+| 分步内容分析 | 链接解析成功后只自动提取并展示文本；点击 AI 总结后复用文本生成总结和思维导图，失败可重试 | ✅ |
 | 全站免费 | 不限次数、不限清晰度、无需登录 | ✅ |
-| AI 视频总结 + AI 问答 | GLM 生成摘要/时间戳章节要点/关键词/思维导图，可多轮追问（限时免费，每分钟 3 次） | ✅ |
+| AI 视频总结 + AI 问答 | 已配置的 OpenAI 兼容模型生成摘要/时间戳章节要点/关键词/思维导图，可多轮追问（当前免费开放，每分钟 3 次） | ✅ |
 | 会员/模拟支付 | 激活码 `VIP2026` 或 `DOWN8888`（付费策略未来制定） | 🚧 |
 
 ## 项目结构
@@ -43,7 +44,7 @@ python -m venv .venv
 ├── backend/         # FastAPI + yt-dlp 子进程封装 + 抖音免 Cookie 分享流通道（douyin.py）
 ├── frontend/        # Vue3 单页（本地 vendor，零构建）
 ├── downloads/       # 临时文件（2 小时自动清理）
-└── tests/fixtures/  # 字幕提取集成测试夹具（本地 HTML5 track 字幕页）
+└── tests/           # 后端与前端流程回归、字幕提取夹具
 ```
 
 ## API 概览
@@ -53,18 +54,23 @@ python -m venv .venv
 - `GET /api/tasks/{id}` → 进度（状态/百分比/速度/ETA）
 - `GET /api/file/{id}` → 文件下载
 - `POST /api/extract-text` `{url}` → `{title, text, chars}`
-- `POST /api/summarize` `{url}` → `{session_id, summary, chapters[{title,start,points}], keywords, mindmap, model}`（GLM，需配置 Key）
+- `POST /api/summarize` `{url}` → `{session_id, transcript, summary, chapters[{title,start,points}], keywords, mindmap, model}`（需配置 LLM Key）
+- `POST /api/analyze` `{url, include_summary?: false}` → 默认仅提取文本；显式传 `true` 才同时生成 AI 总结和导图
+- `POST /api/analysis/{id}/summarize` → 用户点击 AI 总结后，复用已有字幕时间轴生成总结和思维导图
+- `GET /api/analysis/{id}` → 分阶段进度及 `text_result`、`summary_result`；文本提取成功后先展示，AI 失败时仍保留文本
+- `POST /api/analysis/{id}/retry` → 按原任务模式重试；仅提取文本的任务不会调用 AI，已有文本的 AI 任务复用字幕时间轴（任务逻辑有效期 60 分钟，惰性清理）
 - `POST /api/qa` `{session_id, question, history[]}` → `{answer}`（基于总结转写的多轮追问）
 - 完整契约见 `docs/方案设计.md`；交互式文档 `http://127.0.0.1:8000/api/docs`
 
 ## 已知限制（二期方向）
 
 - 需登录内容（如 B 站 1080P+ 部分）匿名仅能获取较低清晰度；计划支持 Cookie 配置
-- B 站字幕（含 AI 字幕）需登录才可获取，无字幕视频暂不能提取文本；计划接入 Whisper 本地转写
+- 文本/总结链路不会读取浏览器 Cookie 或 `backend/cookies.txt`。没有公开字幕时，可选用本机 Whisper 从匿名音频流转写，音频不会上传；启用需安装 `openai-whisper`、PyTorch 和 FFmpeg，首次运行会下载模型权重到本机。无法匿名获取音频的视频仍不可提取
 - 抖音走免 Cookie 移动端分享流（`backend/douyin.py`）：yt-dlp 官方抖音通道需浏览器签名 Cookie（上游无解），
   分享流可匿名获取**无水印 720P 单一清晰度** + MP3，暂不支持多清晰度；抖音无字幕接口，文本提取需等二期转写
 - 小红书等少数平台暂不支持；YouTube 等境外平台需服务器网络可达
-- AI 总结需在 `backend/local_config.py` 配置 LLM Key（智谱 glm-4-flash 免费，未配置时明确报错）；B 站所有字幕需登录，可将浏览器 Cookie 放 `backend/cookies.txt` 解锁（详见 docs/方案设计-AI视频总结.md §1.1）
+- AI 总结需通过环境变量或 `backend/local_config.py` 配置 LLM Key；使用 AI 时，字幕文本与视频标题会发送给所配置的 LLM 服务商。分析任务与问答会话保存在服务进程内存，逻辑有效期 60 分钟并惰性清理，重启后丢失
+- 可通过 `ASR_PYTHON` 指定已安装 Whisper/PyTorch 的 Python，`ASR_MODEL` 选择 `base`、`small` 等模型，`ASR_MODEL_CACHE` 指定本机模型缓存目录；默认模型为 `base`
 
 ## 相关文档
 
@@ -73,6 +79,7 @@ python -m venv .venv
 | `docs/需求文档.md` | 背景目标、用户故事、功能清单与免费/付费边界 |
 | `docs/方案设计.md` | 架构总览、API 契约、核心流程、UI 规范、扩展指引 |
 | `docs/项目总结.md` | 交付复盘：需求/设计提炼、抖音免 Cookie 通道原理、踩坑记录、验证结论、二期路线 |
+| [视频总结功能总结](docs/视频总结功能总结.md) | 视频总结最终需求、分步方案、架构、任务接口、配置、费用边界、15 项回归验证与已知限制 |
 
 ## 免责声明
 

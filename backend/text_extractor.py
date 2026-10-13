@@ -1,6 +1,7 @@
 """字幕文本提取：yt-dlp 下载平台字幕/自动字幕（srt/vtt）并转为纯文本。"""
 import asyncio
 import html
+import os
 import re
 import shutil
 import uuid
@@ -8,7 +9,8 @@ from pathlib import Path
 
 import config
 import douyin
-from downloader import YT_DLP, BusinessError, browser_args
+from downloader import YT_DLP, BusinessError, subtitle_browser_args
+from local_transcriber import transcribe_url
 
 TIMESTAMP_RE = re.compile(r"\d{1,2}:\d{2}:\d{2}[.,]\d{3}")
 TAG_RE = re.compile(r"<[^>]+>")
@@ -45,19 +47,20 @@ async def extract_text(url: str) -> dict:
     workdir = config.DOWNLOAD_DIR / "subs" / uuid.uuid4().hex
     workdir.mkdir(parents=True, exist_ok=True)
     args = [
-        *YT_DLP, "--skip-download",
+        *YT_DLP, "--ignore-config", "--skip-download",
         "--write-subs", "--write-auto-subs",
         "--sub-langs", "zh.*,zh-Hans,zh,en",
         "--sub-format", "srt/vtt",
         "--no-playlist", "--no-warnings", "--socket-timeout", "15",
         "-o", str(workdir / "%(id)s.%(ext)s"),
-        "--print", "after_move:title",
-        *browser_args(url),
+        "--print", "title", "--no-simulate",
+        *subtitle_browser_args(url),
         url,
     ]
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         )
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout=config.EXTRACT_TIMEOUT_SECONDS)
@@ -76,7 +79,9 @@ async def extract_text(url: str) -> dict:
             key=lambda f: _lang_score(f.name), reverse=True,
         )
         if not sub_files:
-            raise BusinessError("该视频没有可用字幕（平台未提供），AI 字幕转写功能将在二期支持")
+            asr = await transcribe_url(url, workdir)
+            text = asr["text"]
+            return {"title": title, "lang": "zh-asr", "chars": len(text), "text": text}
 
         sub = sub_files[0]
         parts = sub.name.split(".")

@@ -21,6 +21,8 @@ service = DownloadService()
 # 阶段 4 新增：AI 总结 + AI 问答（独立路由模块，开闭原则纯增量接线）
 import summarize_api  # noqa: E402
 app.include_router(summarize_api.router)
+import analysis_api  # noqa: E402
+app.include_router(analysis_api.router)
 
 
 class ParseRequest(BaseModel):
@@ -95,6 +97,11 @@ async def extract_text_api(req: ParseRequest):
 async def startup():
     service.cleanup()
     asyncio.create_task(service.cleanup_loop())
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    await analysis_api.service.shutdown()
 
 
 # 静态托管放最后，避免吞掉 /api 路由
