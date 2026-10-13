@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="闪电下载 - 万能视频下载工具，支持哔哩哔哩、抖音、YouTube 等 1800+ 平台，免费、高清、不限次数，手机电脑都能用">
+  <title>闪电下载 - 万能视频下载工具 | 免费 · 高清 · 不限量</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>⚡</text></svg>">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app" v-cloak>
+
+  <!-- ═══════════ 导航栏 ═══════════ -->
+  <header class="navbar">
+    <div class="container nav-inner">
+      <a class="logo" href="#home">
+        <span class="logo-icon">⚡</span>
+        <span class="logo-text">闪电<em>下载</em></span>
+      </a>
+      <nav class="nav-menu">
+        <a href="#home">首页</a>
+        <a href="#features">功能</a>
+        <a href="#pricing">定价</a>
+        <a href="#faq">常见问题</a>
+      </nav>
+      <button class="btn btn-outline btn-sm nav-vip" v-if="!isVip" @click="openPay">🔓 解锁会员</button>
+      <span class="vip-badge-nav" v-else>👑 会员</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- ═══════════ Hero ═══════════ -->
+    <section class="hero" id="home">
+      <div class="hero-glow glow-1"></div>
+      <div class="hero-glow glow-2"></div>
+      <div class="container hero-inner">
+        <h1 class="hero-title">全网视频，<span class="accent">一键下载</span></h1>
+        <p class="hero-sub">支持哔哩哔哩、抖音、YouTube 等平台，免费、高清、不限次数，手机电脑都能用</p>
+
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
+          </svg>
+          <input v-model="url" type="text" class="search-input" spellcheck="false"
+                 placeholder="粘贴视频链接，如 https://www.bilibili.com/video/BV..."
+                 @keyup.enter="parseVideo" :disabled="parsing">
+          <button class="btn btn-primary search-btn" @click="parseVideo" :disabled="parsing || !url.trim()">
+            <span v-if="!parsing">解析视频</span>
+            <span v-else class="loading-dot"><i></i><i></i><i></i></span>
+          </button>
+        </div>
+        <p class="search-tip" v-if="parsing">正在解析，通常需要几秒钟，请稍候…</p>
+
+        <div class="platforms">
+          <span class="platform-chip" v-for="p in platforms" :key="p.name">
+            <span class="platform-dot" :style="{background: p.color}">{{ p.icon }}</span>{{ p.name }}
+          </span>
+        </div>
+        <p class="trust-line">已支持 <b>1,800+</b> 网站 · 无需登录 · 完全免费</p>
+      </div>
+    </section>
+
+    <!-- ═══════════ 解析结果卡 ═══════════ -->
+    <section class="container result-section" id="result" v-if="videoInfo" ref="resultSection">
+      <div class="card result-card">
+        <div class="result-media">
+          <img v-if="videoInfo.thumbnail" :src="videoInfo.thumbnail" :alt="videoInfo.title" referrerpolicy="no-referrer">
+          <div v-else class="media-fallback">▶</div>
+          <span class="duration-badge" v-if="videoInfo.duration">{{ formatDuration(videoInfo.duration) }}</span>
+        </div>
+        <div class="result-body">
+          <div class="result-meta">
+            <span class="platform-badge">{{ videoInfo.platform }}</span>
+            <span class="uploader" v-if="videoInfo.uploader">UP：{{ videoInfo.uploader }}</span>
+          </div>
+          <h3 class="result-title">{{ videoInfo.title }}</h3>
+
+          <div class="quality-row">
+            <span class="quality-label">选择清晰度</span>
+            <div class="quality-pills">
+              <button v-for="q in videoInfo.qualities" :key="q.value"
+                      class="quality-pill" :class="{active: selectedQuality === q.value, audio: q.type === 'audio'}"
+                      @click="selectedQuality = q.value" :disabled="dl.status === 'downloading' || dl.status === 'queued'">
+                {{ q.label }}<em v-if="q.filesize_label">{{ q.filesize_label }}</em>
+              </button>
+            </div>
+          </div>
+
+          <!-- 下载操作区 -->
+          <div class="action-row">
+            <template v-if="!dl.taskId || dl.status === 'error' || dl.status === 'expired'">
+              <button class="btn btn-primary btn-lg" @click="startDownload">
+                ⬇ 立即下载
+              </button>
+              <button class="btn btn-outline btn-lg" @click="extractText" :disabled="textLoading">
+                <span v-if="!textLoading">📝 提取文本</span>
+                <span v-else class="loading-dot"><i></i><i></i><i></i></span>
+              </button>
+              <button class="btn btn-outline btn-lg btn-vip" @click="onSummarizeClick">✨ AI 总结 <small>会员</small></button>
+            </template>
+
+            <template v-else-if="dl.status === 'done'">
+              <a class="btn btn-success btn-lg" :href="dl.download_url">💾 保存文件</a>
+              <button class="btn btn-ghost" @click="resetDownload">↻ 重新下载</button>
+            </template>
+
+            <div v-else class="progress-wrap">
+              <div class="progress-head">
+                <span class="status-badge" :class="dl.status">
+                  {{ statusText(dl.status) }}
+                </span>
+                <span class="progress-num">{{ dl.progress }}%</span>
+              </div>
+              <div class="progress-bar"><div class="progress-inner" :style="{width: dl.progress + '%'}"></div></div>
+              <div class="progress-meta">
+                <span v-if="dl.speed">{{ dl.speed }}</span>
+                <span v-if="dl.eta">剩余 {{ dl.eta }}</span>
+                <span class="meta-hint">视频稍大时合并需要一点时间，请耐心等待</span>
+              </div>
+            </div>
+          </div>
+
+          <p class="file-hint">📁 文件在服务器保留 2 小时，下载完成后请及时保存到本地</p>
+          <p class="error-hint" v-if="dl.status === 'error'">⚠ {{ dl.error || '下载失败，请重试' }}</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ 功能特性 ═══════════ -->
+    <section class="section" id="features">
+      <div class="container">
+        <h2 class="section-title">强大功能，<span class="accent">简单易用</span></h2>
+        <p class="section-sub">为效率而生的视频下载工具</p>
+        <div class="feature-grid">
+          <div class="card feature-card" v-for="f in features" :key="f.title">
+            <div class="feature-icon">{{ f.icon }}</div>
+            <h3>{{ f.title }}</h3>
+            <p>{{ f.desc }}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ 定价 ═══════════ -->
+    <section class="section section-pricing" id="pricing">
+      <div class="container">
+        <h2 class="section-title">简单透明的<span class="accent">定价</span></h2>
+        <p class="section-sub">核心功能永久免费，按需升级会员</p>
+        <div class="pricing-grid">
+          <div class="card pricing-card">
+            <h3 class="plan-name">免费版</h3>
+            <div class="plan-price"><b>¥0</b><span>/永久</span></div>
+            <ul class="plan-list">
+              <li>✓ 全平台视频下载</li>
+              <li>✓ 不限次数、不限清晰度</li>
+              <li>✓ MP3 音频提取</li>
+              <li>✓ 字幕文本提取</li>
+              <li>✓ 手机 / 电脑全端使用</li>
+            </ul>
+            <button class="btn btn-outline btn-block" @click="scrollTo('#home')">立即使用</button>
+          </div>
+          <div class="card pricing-card plan-vip">
+            <span class="plan-badge">👑 最受欢迎</span>
+            <h3 class="plan-name">会员版</h3>
+            <div class="plan-price"><b>¥9.9</b><span>/月</span></div>
+            <ul class="plan-list">
+              <li>✓ 包含全部免费功能</li>
+              <li class="vip-item">✨ AI 视频总结（即将上线）</li>
+              <li>✓ 未来新功能优先体验</li>
+              <li>✓ 专属客服支持</li>
+              <li class="muted">✗ 更多权益持续加入</li>
+            </ul>
+            <button class="btn btn-primary btn-block" @click="openPay">立即开通会员</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ FAQ ═══════════ -->
+    <section class="section" id="faq">
+      <div class="container faq-container">
+        <h2 class="section-title">常见<span class="accent">问题</span></h2>
+        <div class="faq-list">
+          <div class="faq-item card" v-for="(item, i) in faqs" :key="i">
+            <button class="faq-q" @click="openFaq = openFaq === i ? -1 : i">
+              <span>{{ item.q }}</span><span class="faq-arrow" :class="{open: openFaq === i}">▾</span>
+            </button>
+            <div class="faq-a" v-show="openFaq === i">{{ item.a }}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ═══════════ 页脚 ═══════════ -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-links">
+        <a href="#features">关于功能</a><a href="#pricing">会员定价</a><a href="#faq">帮助中心</a>
+      </div>
+      <p class="footer-copy">⚡ 闪电下载 © 2026 · 基于 yt-dlp 开源项目 · 仅供个人学习交流使用，请尊重原作者版权</p>
+    </div>
+  </footer>
+
+  <!-- ═══════════ 文本提取弹窗 ═══════════ -->
+  <div class="modal-mask" v-if="showTextModal" @click.self="showTextModal = false">
+    <div class="modal text-modal">
+      <div class="modal-head">
+        <h3>📝 视频文本</h3>
+        <button class="modal-close" @click="showTextModal = false">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="text-meta">{{ textResult.title }} · {{ textResult.chars }} 字</p>
+        <div class="text-content">{{ textResult.text }}</div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-outline" @click="copyText">📋 复制文本</button>
+        <button class="btn btn-primary" @click="downloadTxt">⬇ 下载 .txt</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 模拟支付弹窗 ═══════════ -->
+  <div class="modal-mask" v-if="showPayModal" @click.self="showPayModal = false">
+    <div class="modal pay-modal">
+      <div class="modal-head">
+        <h3>👑 开通会员</h3>
+        <button class="modal-close" @click="showPayModal = false">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="pay-tabs">
+          <button :class="{active: payTab === 'wechat'}" @click="payTab = 'wechat'">💬 微信支付</button>
+          <button :class="{active: payTab === 'alipay'}" @click="payTab = 'alipay'">🅰️ 支付宝</button>
+        </div>
+        <div class="pay-amount">会员月卡 <b>¥9.9</b></div>
+        <div class="qr-placeholder" :class="payTab">
+          <div class="qr-pattern"></div>
+          <span>{{ payTab === 'wechat' ? '微信' : '支付宝' }}扫码二维码（演示）</span>
+        </div>
+        <button class="btn btn-primary btn-block" @click="mockPaySuccess">✔ 模拟支付成功，立即开通</button>
+        <div class="pay-divider"><span>或使用激活码</span></div>
+        <div class="code-row">
+          <input v-model="vipCode" type="text" placeholder="请输入激活码，如 VIP2026">
+          <button class="btn btn-outline" @click="activateVip">激活</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ Toast ═══════════ -->
+  <div class="toast-wrap">
+    <transition-group name="toast">
+      <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type">{{ t.msg }}</div>
+    </transition-group>
+  </div>
+
+</div>
+<script src="/js/vendor/vue.global.prod.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

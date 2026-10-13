@@ -1,0 +1,12 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# 运行时产物（临时下载文件）；保留 .gitkeep 维持目录
+downloads/*
+!downloads/.gitkeep
+
+# 其他
+.DS_Store
+*.log
