@@ -24,11 +24,11 @@ const app = createApp({
       { icon: "🆓", title: "完全免费", desc: "不限次数、不限清晰度、无需注册登录" },
       { icon: "🌐", title: "海量平台", desc: "基于 yt-dlp 引擎，支持 1800+ 视频网站" },
       { icon: "🔒", title: "隐私安全", desc: "文件 2 小时自动清理，不留存任何个人数据" },
-      { icon: "✨", title: "AI 视频总结", desc: "一键生成视频内容摘要（会员专享，即将上线）" },
+      { icon: "✨", title: "AI 视频总结", desc: "摘要+时间戳章节+思维导图+追问问答，快速吃透长视频" },
     ];
     const faqs = [
       { q: "支持哪些平台？", a: "基于 yt-dlp 开源引擎，支持哔哩哔哩、抖音、快手、微博、YouTube、Instagram、TikTok 等 1800+ 网站；少数平台（如小红书）暂不支持。" },
-      { q: "真的是完全免费吗？", a: "是。视频下载与文本提取不限次数、不限清晰度、无需登录；仅后续上线的 AI 视频总结为会员功能。" },
+      { q: "真的是完全免费吗？", a: "是。视频下载与文本提取不限次数、不限清晰度、无需登录；AI 总结与 AI 问答当前限时免费开放（每分钟 3 次）。" },
       { q: "下载的文件会保存多久？", a: "文件在服务器临时保留 2 小时后自动删除，请下载完成后及时保存到本地设备。" },
       { q: "为什么有些视频解析失败？", a: "常见原因：链接无效、平台限制需要登录、内容为私有或地域受限。需要登录的内容（如 B 站 1080P+ 部分）计划二期支持 Cookie。" },
       { q: "手机上怎么保存视频？", a: "点击\"保存文件\"后浏览器会直接下载；iOS 可在\"文件\"App 中查看，安卓在下载目录查看，也可保存到相册。" },
@@ -219,9 +219,176 @@ const app = createApp({
       vipCode.value = "";
       toast("激活成功，欢迎加入会员 👑", "success");
     }
-    function onSummarizeClick() {
-      if (!isVip.value) { openPay(); return; }
-      toast("AI 视频总结将在阶段 4 上线，敬请期待 ✨");
+    function onSummarizeClick() { doSummarize(); }
+
+    /* ---------- 阶段4：AI 总结 + AI 问答 + 思维导图 ---------- */
+    const sumLoading = ref(false);
+    const showSumModal = ref(false);
+    const sumResult = reactive({
+      sessionId: "", title: "", chars: 0, model: "", elapsed: 0,
+      summary: "", chapters: [], keywords: [], mindmap: null,
+    });
+    const mm = reactive({ viewBox: "0 0 640 160", width: 640, nodes: [], links: [] });
+    const qaMessages = reactive([]);
+    const qaInput = ref("");
+    const qaLoading = ref(false);
+
+    async function doSummarize() {
+      const u = videoInfo.value?.webpage_url || url.value.trim();
+      if (!u) { toast("请先解析视频链接", "error"); return; }
+      if (sumLoading.value) return;
+      sumLoading.value = true;
+      try {
+        const r = await api("/api/summarize", { url: u });
+        Object.assign(sumResult, r);
+        sumResult.sessionId = r.session_id || "";  // 后端 snake_case 映射
+        qaMessages.splice(0, qaMessages.length);
+        qaInput.value = "";
+        ensureMindmap();
+        showSumModal.value = true;
+        setTimeout(layoutMindmap, 80);
+        toast("AI 总结完成，可继续向视频提问 ✨", "success");
+      } catch (e) {
+        toast(e.message, "error");
+      } finally {
+        sumLoading.value = false;
+      }
+    }
+
+    function ensureMindmap() {
+      if (sumResult.mindmap && sumResult.mindmap.label) return;
+      sumResult.mindmap = {
+        label: (sumResult.title || "视频").slice(0, 14),
+        children: (sumResult.chapters || []).map(c => ({
+          label: String(c.title || "").slice(0, 14),
+          children: (c.points || []).slice(0, 3).map(p => ({ label: String(p).slice(0, 14) })),
+        })),
+      };
+    }
+
+    function mmTrim(s) { s = String(s || ""); return s.length > 14 ? s.slice(0, 13) + "…" : s; }
+
+    function layoutMindmap() {
+      const root = sumResult.mindmap;
+      if (!root || !root.label) { mm.nodes = []; mm.links = []; return; }
+      const W = 176, STEP = 46, PADX = 14, PADY = 16;
+      const nodes = [], links = [];
+      let cursor = 0, maxDepth = 0;
+      function place(node, depth, parent) {
+        maxDepth = Math.max(maxDepth, depth);
+        const kids = node.children || [];
+        const rec = {
+          id: nodes.length, label: mmTrim(node.label), depth,
+          childCount: kids.length, collapsed: !!node._collapsed,
+          x: PADX + Math.min(depth, 4) * (W + 28), w: W, y: 0, _ref: node,
+        };
+        nodes.push(rec);
+        if (parent) links.push({ from: parent.id, to: rec.id });
+        const shown = rec.collapsed ? [] : kids;
+        if (!shown.length) { rec.y = PADY + cursor * STEP + 17; cursor++; }
+        else {
+          const ys = shown.map(k => place(k, depth + 1, rec));
+          rec.y = (ys[0] + ys[ys.length - 1]) / 2;
+        }
+        return rec.y;
+      }
+      place(root, 0, null);
+      const height = Math.max(cursor * STEP + PADY * 2, 140);
+      const width = PADX * 2 + Math.min(maxDepth, 4) * (W + 28) + W;
+      mm.viewBox = `0 0 ${width} ${height}`;
+      mm.width = width;
+      mm.nodes = nodes;
+      mm.links = links.map(l => {
+        const a = nodes[l.from], b = nodes[l.to];
+        const x1 = a.x + a.w, y1 = a.y, x2 = b.x, y2 = b.y;
+        const dx = Math.max(24, (x2 - x1) / 2);
+        return { d: `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}` };
+      });
+    }
+
+    function toggleMmNode(n) {
+      if (!n.childCount) return;
+      n._ref._collapsed = !n._ref._collapsed;
+      layoutMindmap();
+    }
+
+    async function askQuestion() {
+      const q = qaInput.value.trim();
+      if (!q || qaLoading.value) return;
+      if (!sumResult.sessionId) { toast("请先生成 AI 总结", "error"); return; }
+      qaInput.value = "";
+      qaMessages.push({ role: "user", content: q });
+      qaLoading.value = true;
+      try {
+        const history = qaMessages.slice(0, -1).slice(-6).map(m => ({ role: m.role, content: m.content }));
+        const r = await api("/api/qa", { session_id: sumResult.sessionId, question: q, history });
+        qaMessages.push({ role: "assistant", content: r.answer });
+      } catch (e) {
+        qaMessages.push({ role: "assistant", content: "⚠ " + e.message });
+      } finally {
+        qaLoading.value = false;
+        setTimeout(() => {
+          const el = document.querySelector(".sum-modal .qa-list");
+          if (el) el.scrollTop = el.scrollHeight;
+        }, 30);
+      }
+    }
+
+    async function copyTs(sec) {
+      const ts = "[" + formatDuration(sec) + "]";
+      try { await navigator.clipboard.writeText(ts); toast(`已复制 ${ts}`, "success"); }
+      catch { toast(`时间点 ${ts}`, "info"); }
+    }
+
+    function summaryToText() {
+      const r = sumResult;
+      let out = `【${r.title}】AI 视频总结\n\n摘要：${r.summary}\n\n关键词：${(r.keywords || []).join("、")}\n\n`;
+      (r.chapters || []).forEach(c => {
+        out += `[${formatDuration(c.start)}] ${c.title}\n`;
+        (c.points || []).forEach(p => { out += `  - ${p}\n`; });
+        out += "\n";
+      });
+      out += "—— 由闪电下载 AI 生成（基于视频字幕）";
+      return out;
+    }
+
+    function summaryToMd() {
+      const r = sumResult;
+      let out = `# ${r.title} · AI 视频总结\n\n> 摘要：${r.summary}\n\n`;
+      if (r.keywords && r.keywords.length) out += `**关键词**：${r.keywords.join("、")}\n\n`;
+      (r.chapters || []).forEach((c, i) => {
+        out += `## ${i + 1}. [${formatDuration(c.start)}] ${c.title}\n\n`;
+        (c.points || []).forEach(p => { out += `- ${p}\n`; });
+        out += "\n";
+      });
+      out += `---\n*由闪电下载 AI 生成 · 模型 ${r.model} · 字幕 ${r.chars} 字*\n`;
+      return out;
+    }
+
+    async function copySummary() {
+      try {
+        await navigator.clipboard.writeText(summaryToText());
+        toast("总结已复制到剪贴板", "success");
+      } catch {
+        const ta = document.createElement("textarea");
+        ta.value = summaryToText();
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+        toast("总结已复制到剪贴板", "success");
+      }
+    }
+
+    function downloadSummary(fmt) {
+      const isMd = fmt === "md";
+      const content = isMd ? summaryToMd() : summaryToText();
+      const blob = new Blob([content], { type: (isMd ? "text/markdown" : "text/plain") + ";charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${(sumResult.title || "AI总结").slice(0, 50).replace(/[\\/:*?"<>|]/g, "_")}.${isMd ? "md" : "txt"}`;
+      a.click();
+      URL.revokeObjectURL(a.href);
     }
 
     return {
@@ -231,6 +398,8 @@ const app = createApp({
       showPayModal, payTab, vipCode, isVip, toasts,
       parseVideo, startDownload, resetDownload, extractText, copyText, downloadTxt,
       openPay, mockPaySuccess, activateVip, onSummarizeClick,
+      sumLoading, showSumModal, sumResult, mm, qaMessages, qaInput, qaLoading,
+      askQuestion, copyTs, copySummary, downloadSummary, toggleMmNode,
       formatDuration, statusText, scrollTo,
     };
   },

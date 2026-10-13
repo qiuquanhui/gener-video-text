@@ -18,6 +18,10 @@ URL_RE = re.compile(r"^https?://\S+$")
 app = FastAPI(title="闪电下载", docs_url="/api/docs")
 service = DownloadService()
 
+# 阶段 4 新增：AI 总结 + AI 问答（独立路由模块，开闭原则纯增量接线）
+import summarize_api  # noqa: E402
+app.include_router(summarize_api.router)
+
 
 class ParseRequest(BaseModel):
     url: str

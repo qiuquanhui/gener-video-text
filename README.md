@@ -33,8 +33,8 @@ python -m venv .venv
 | 抖音免 Cookie | 个人主页弹窗链 / 视频链 / `v.douyin.com` 短链均可解析，**无水印 720P + MP3**，全程无需任何 Cookie | ✅ |
 | 文本提取 | 一键提取视频字幕/自动字幕为纯文本，可复制/下载 .txt | ✅ |
 | 全站免费 | 不限次数、不限清晰度、无需登录 | ✅ |
-| AI 视频总结 | 会员专属（模拟支付），阶段 4 开发 | 🚧 |
-| 会员/模拟支付 | 激活码 `VIP2026` 或 `DOWN8888` | 阶段 4 |
+| AI 视频总结 + AI 问答 | GLM 生成摘要/时间戳章节要点/关键词/思维导图，可多轮追问（限时免费，每分钟 3 次） | ✅ |
+| 会员/模拟支付 | 激活码 `VIP2026` 或 `DOWN8888`（付费策略未来制定） | 🚧 |
 
 ## 项目结构
 
@@ -53,6 +53,8 @@ python -m venv .venv
 - `GET /api/tasks/{id}` → 进度（状态/百分比/速度/ETA）
 - `GET /api/file/{id}` → 文件下载
 - `POST /api/extract-text` `{url}` → `{title, text, chars}`
+- `POST /api/summarize` `{url}` → `{session_id, summary, chapters[{title,start,points}], keywords, mindmap, model}`（GLM，需配置 Key）
+- `POST /api/qa` `{session_id, question, history[]}` → `{answer}`（基于总结转写的多轮追问）
 - 完整契约见 `docs/方案设计.md`；交互式文档 `http://127.0.0.1:8000/api/docs`
 
 ## 已知限制（二期方向）
@@ -62,7 +64,7 @@ python -m venv .venv
 - 抖音走免 Cookie 移动端分享流（`backend/douyin.py`）：yt-dlp 官方抖音通道需浏览器签名 Cookie（上游无解），
   分享流可匿名获取**无水印 720P 单一清晰度** + MP3，暂不支持多清晰度；抖音无字幕接口，文本提取需等二期转写
 - 小红书等少数平台暂不支持；YouTube 等境外平台需服务器网络可达
-- LLM 未配置 Key 时，AI 总结将降级为本地抽取式摘要（阶段 4 实现说明见 docs/方案设计.md §7）
+- AI 总结需在 `backend/local_config.py` 配置 LLM Key（智谱 glm-4-flash 免费，未配置时明确报错）；B 站所有字幕需登录，可将浏览器 Cookie 放 `backend/cookies.txt` 解锁（详见 docs/方案设计-AI视频总结.md §1.1）
 
 ## 相关文档
 

@@ -97,7 +97,10 @@
                 <span v-if="!textLoading">📝 提取文本</span>
                 <span v-else class="loading-dot"><i></i><i></i><i></i></span>
               </button>
-              <button class="btn btn-outline btn-lg btn-vip" @click="onSummarizeClick">✨ AI 总结 <small>会员</small></button>
+              <button class="btn btn-outline btn-lg btn-vip" @click="onSummarizeClick" :disabled="sumLoading">
+                <span v-if="!sumLoading">✨ AI 总结 <small>免费</small></span>
+                <span v-else class="loading-dot"><i></i><i></i><i></i></span>
+              </button>
             </template>
 
             <template v-else-if="dl.status === 'done'">
@@ -156,6 +159,7 @@
               <li>✓ 不限次数、不限清晰度</li>
               <li>✓ MP3 音频提取</li>
               <li>✓ 字幕文本提取</li>
+              <li>✓ AI 总结 + AI 问答（限时免费）</li>
               <li>✓ 手机 / 电脑全端使用</li>
             </ul>
             <button class="btn btn-outline btn-block" @click="scrollTo('#home')">立即使用</button>
@@ -166,7 +170,7 @@
             <div class="plan-price"><b>¥9.9</b><span>/月</span></div>
             <ul class="plan-list">
               <li>✓ 包含全部免费功能</li>
-              <li class="vip-item">✨ AI 视频总结（即将上线）</li>
+              <li class="vip-item">✨ 未来 AI 高级能力优先体验</li>
               <li>✓ 未来新功能优先体验</li>
               <li>✓ 专属客服支持</li>
               <li class="muted">✗ 更多权益持续加入</li>
@@ -244,6 +248,68 @@
           <input v-model="vipCode" type="text" placeholder="请输入激活码，如 VIP2026">
           <button class="btn btn-outline" @click="activateVip">激活</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ AI 总结弹窗（阶段4） ═══════════ -->
+  <div class="modal-mask" v-if="showSumModal" @click.self="showSumModal = false">
+    <div class="modal sum-modal">
+      <div class="modal-head">
+        <h3>✨ AI 视频总结</h3>
+        <button class="modal-close" @click="showSumModal = false">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="sum-meta">{{ sumResult.title }} · 字幕 {{ sumResult.chars }} 字 · {{ sumResult.model }} · {{ sumResult.elapsed }}s</p>
+
+        <div class="sum-summary-card"><p>{{ sumResult.summary }}</p></div>
+
+        <div class="sum-keywords" v-if="sumResult.keywords.length">
+          <span class="kw-chip" v-for="k in sumResult.keywords" :key="k">{{ k }}</span>
+        </div>
+
+        <div class="sum-section-title">📋 章节要点（点击时间戳可复制）</div>
+        <div class="sum-chapters">
+          <div class="sum-chapter" v-for="(c, i) in sumResult.chapters" :key="i">
+            <div class="sum-ch-head">
+              <button class="ts-btn" @click="copyTs(c.start)" title="复制时间点">[{{ formatDuration(c.start) }}]</button>
+              <b>{{ c.title }}</b>
+            </div>
+            <ul class="sum-points">
+              <li v-for="(p, j) in c.points" :key="j">{{ p }}</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="sum-section-title">🧠 思维导图（点击节点可折叠）</div>
+        <div class="mindmap-wrap">
+          <svg :viewBox="mm.viewBox" :style="{ width: mm.width + 'px' }">
+            <path v-for="(l, i) in mm.links" :key="'l' + i" class="mm-link" :d="l.d"/>
+            <g v-for="n in mm.nodes" :key="'n' + n.id" class="mm-node"
+               :class="'depth' + n.depth" :transform="`translate(${n.x}, ${n.y})`" @click="toggleMmNode(n)">
+              <rect x="0" y="-17" :width="n.w" height="34" rx="8"/>
+              <text x="12" y="5">{{ n.label }}</text>
+              <text v-if="n.childCount" class="mm-fold" :x="n.w - 16" y="5">{{ n.collapsed ? '+' : '−' }}</text>
+            </g>
+          </svg>
+        </div>
+
+        <div class="sum-section-title">💬 向视频提问</div>
+        <div class="qa-list">
+          <p class="qa-hint" v-if="!qaMessages.length && !qaLoading">例如：这个视频的核心结论是什么？第 3 章的重点能再展开讲讲吗？</p>
+          <div class="qa-msg" :class="m.role" v-for="(m, i) in qaMessages" :key="i">{{ m.content }}</div>
+          <div class="qa-msg assistant qa-typing" v-if="qaLoading">思考中<span class="loading-dot"><i></i><i></i><i></i></span></div>
+        </div>
+        <div class="qa-input-row">
+          <input v-model="qaInput" type="text" placeholder="基于视频内容提问…" maxlength="500"
+                 @keyup.enter="askQuestion" :disabled="qaLoading">
+          <button class="btn btn-primary" @click="askQuestion" :disabled="qaLoading || !qaInput.trim()">发送</button>
+        </div>
+      </div>
+      <div class="modal-foot sum-foot">
+        <button class="btn btn-outline" @click="copySummary">📋 复制全文</button>
+        <button class="btn btn-outline" @click="downloadSummary('md')">⬇ .md</button>
+        <button class="btn btn-primary" @click="downloadSummary('txt')">⬇ .txt</button>
       </div>
     </div>
   </div>
