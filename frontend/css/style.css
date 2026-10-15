@@ -193,6 +193,16 @@ body {
 .sp-body { padding: 18px 20px 20px; min-height: 300px; flex: 1; }
 .sp-body .mindmap-wrap { max-height: 460px; }
 .sp-body .analysis-transcript { max-height: 460px; }
+
+/* 章节 Tab：固定高度内滚动，全部章节可滚动查看 */
+.chapters-scroll { max-height: 480px; overflow-y: auto; padding-right: 6px; }
+.chapters-scroll::-webkit-scrollbar { width: 8px; }
+.chapters-scroll::-webkit-scrollbar-thumb { background: #C7D2FE; border-radius: 4px; }
+.chapters-scroll::-webkit-scrollbar-thumb:hover { background: #93C5FD; }
+.chapters-scroll::-webkit-scrollbar-track { background: transparent; }
+.chapters-count { margin: 0 0 10px; font-size: 12.5px; color: var(--text-3); }
+.sp-body .sum-chapters { margin-bottom: 0; }
+.sp-body .sum-chapters .sum-chapter:last-child { margin-bottom: 0; }
 .mm-card-actions-inline { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 
 @media (max-width: 980px) {

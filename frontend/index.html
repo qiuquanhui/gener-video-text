@@ -188,13 +188,16 @@
               <div v-if="sumLoading" class="analysis-placeholder" role="status">正在生成章节要点…</div>
               <p v-else-if="analysis.summaryError" class="error-hint">{{ analysis.summaryError }}</p>
               <template v-else-if="sumResult.summary">
-                <div class="sum-chapters">
-                  <div class="sum-chapter" v-for="(c, i) in sumResult.chapters" :key="i">
-                    <div class="sum-ch-head">
-                      <button class="ts-btn" @click="copyTs(c.start)" title="复制时间点">[{{ formatDuration(c.start) }}]</button>
-                      <b>{{ c.title }}</b>
+                <div class="chapters-scroll">
+                  <p class="chapters-count">共 {{ sumResult.chapters.length }} 章 · 点击时间戳可复制 · 列表可滚动 ↓</p>
+                  <div class="sum-chapters">
+                    <div class="sum-chapter" v-for="(c, i) in sumResult.chapters" :key="i">
+                      <div class="sum-ch-head">
+                        <button class="ts-btn" @click="copyTs(c.start)" title="复制时间点">[{{ formatDuration(c.start) }}]</button>
+                        <b>{{ c.title }}</b>
+                      </div>
+                      <ul class="sum-points"><li v-for="(p, j) in c.points" :key="j">{{ p }}</li></ul>
                     </div>
-                    <ul class="sum-points"><li v-for="(p, j) in c.points" :key="j">{{ p }}</li></ul>
                   </div>
                 </div>
                 <div class="analysis-actions">
