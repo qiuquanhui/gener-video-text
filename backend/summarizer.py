@@ -8,9 +8,11 @@
 - IP 限流：总结 + 问答共用每分钟 3 次（免费开放的防滥用底线）
 
 实现约束：纯 stdlib（urllib）调 LLM，零新增依赖；提示词驱动严格 JSON
-（智谱官方最佳实践），容错解析 + 失败重试一次。
+（智谱官方最佳实践），容错解析 + 瞬时故障自动重试（总时限兜底防挂死）。
 """
 import collections
+import concurrent.futures
+import http.client
 import json
 import re
 import time
@@ -25,6 +27,8 @@ MAX_TRANSCRIPT_CHARS = 30000   # 超长视频截断（glm-4-flash 128K 上下文
 SESSION_TTL_SECONDS = 60 * 60  # 总结→问答的转写缓存有效期
 SESSION_MAX = 50               # 会话缓存上限（超出淘汰最旧）
 RATE_LIMIT, RATE_WINDOW = 3, 60  # 每 IP 每分钟次数
+LLM_ATTEMPTS = 3               # 瞬时失败（服务繁忙/网络中断）自动重试总次数
+RETRYABLE_HTTP_CODES = {502, 503, 504}
 
 # ---------- 限流 ----------
 
@@ -66,6 +70,17 @@ def _get_session(session_id: str) -> dict:
 
 # ---------- GLM 调用 ----------
 
+# HTTP 调用放独立线程执行：urllib 的 timeout 只约束单次 socket 读，流式/缓慢
+# 滴流的响应可无限重置它导致挂死；外层用 future.result(timeout) 施加总时限。
+_HTTP_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="llm-http")
+
+
+def _post_json(url: str, body: bytes, headers: dict, timeout: float) -> dict:
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
 def _chat(messages: list[dict], json_mode: bool = False) -> str:
     s = get_llm_settings()
     payload = {
@@ -78,33 +93,45 @@ def _chat(messages: list[dict], json_mode: bool = False) -> str:
     if json_mode and "api.deepseek.com" in s["LLM_BASE_URL"].lower():
         payload["response_format"] = {"type": "json_object"}
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        s["LLM_BASE_URL"].rstrip("/") + "/chat/completions",
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + s["LLM_API_KEY"],
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=s["LLM_TIMEOUT_SECONDS"]) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = ""
+    url = s["LLM_BASE_URL"].rstrip("/") + "/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + s["LLM_API_KEY"],
+    }
+    attempt_timeout = float(s["LLM_TIMEOUT_SECONDS"])
+
+    # 服务繁忙（503 等）、响应中断（IncompleteRead）、读超时、滴流挂死均属瞬时
+    # 故障：总时限兜底 + 自动重试，避免用户面对无限挂起后的一次性失败。
+    for attempt in range(LLM_ATTEMPTS):
         try:
-            detail = json.loads(e.read().decode("utf-8", "ignore")).get("error", {}).get("message", "")
-        except Exception:
-            pass
-        raise BusinessError(f"LLM 服务返回错误（HTTP {e.code}）：{detail or '请稍后重试'}")
-    except urllib.error.URLError as e:
-        raise BusinessError(f"LLM 服务连接失败：{e.reason}（请检查网络）")
-    except json.JSONDecodeError:
-        raise BusinessError("LLM 服务响应异常，请重试")
-    try:
-        return data["choices"][0]["message"]["content"] or ""
-    except (KeyError, IndexError, TypeError):
-        raise BusinessError("LLM 响应格式异常，请重试")
+            future = _HTTP_POOL.submit(_post_json, url, body, headers, attempt_timeout)
+            data = future.result(timeout=attempt_timeout + 5)
+        except urllib.error.HTTPError as e:
+            detail = ""
+            try:
+                detail = json.loads(e.read().decode("utf-8", "ignore")).get("error", {}).get("message", "")
+            except Exception:
+                pass
+            if e.code in RETRYABLE_HTTP_CODES and attempt < LLM_ATTEMPTS - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            hint = "，建议稍后重试或临时切换 LLM 服务商" if e.code in RETRYABLE_HTTP_CODES else ""
+            raise BusinessError(f"LLM 服务返回错误（HTTP {e.code}）：{detail or '请稍后重试'}{hint}")
+        except (http.client.HTTPException, urllib.error.URLError, TimeoutError,
+                concurrent.futures.TimeoutError, ConnectionError) as e:
+            if attempt < LLM_ATTEMPTS - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise BusinessError(
+                f"LLM 服务连接超时或中断（{type(e).__name__}），已自动重试 {LLM_ATTEMPTS} 次仍失败；"
+                "服务商可能繁忙，请稍后重试或临时切换 LLM 服务商"
+            )
+        except json.JSONDecodeError:
+            raise BusinessError("LLM 服务响应异常，请重试")
+        try:
+            return data["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError, TypeError):
+            raise BusinessError("LLM 响应格式异常，请重试")
 
 
 # ---------- 转写组装 ----------
@@ -147,16 +174,16 @@ _SUMMARY_USER_TMPL = """视频标题：{title}
   "chapters": [
     {{"title": "章节标题（12 字以内）", "start": 12.4, "points": ["该章关键要点（40 字以内，最多 4 条）"]}}
   ],
-  "keywords": ["关键词（5-8 个）"],
-  "mindmap": {{"label": "视频主题（12 字以内）", "children": [
-    {{"label": "章节", "children": [{{"label": "要点短句（12 字以内）"}}]}}
-  ]}}
+  "keywords": ["关键词（5-8 个）"]
 }}
 
 硬性要求：
 1. chapters 按内容划分 3-8 个章节（短视频可用 1-2 个）；start 为该章起始秒数（取转写时间戳，纯数字）
 2. 要点必须来自转写内容，禁止编造
-3. mindmap 最多三层（主题→章节→要点），label 全部 12 字以内"""
+3. 只输出这个 JSON 对象，第一个字符必须是 {{ ，最后一个字符必须是 }}"""
+
+# 思维导图不再让模型生成（与 chapters 完全重复、输出 token 翻倍拖慢速度），
+# 由 _normalize_summary 基于 chapters 本地构建，结构与此前完全一致。
 
 _RETRY_USER = (
     "你上次输出的不是合法 JSON 或缺少必要字段。"
