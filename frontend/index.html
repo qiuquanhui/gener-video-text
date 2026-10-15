@@ -60,7 +60,7 @@
             <span v-else class="loading-dot"><i></i><i></i><i></i></span>
           </button>
         </div>
-        <p class="auto-analysis-note">解析成功后自动提取并展示视频文本；点击「AI 总结」后生成总结和思维导图。</p>
+        <p class="auto-analysis-note">解析成功后自动提取文本并生成 AI 总结（文章+章节+导图），与视频信息同屏展示。</p>
         <p class="privacy-note">不会读取或上传你的 B 站 Cookie。没有公开字幕时会尝试本机 Whisper 转写，音频不上传；使用 AI 时，文本和标题会发送给已配置的服务商，问答转写在内存保留 60 分钟。</p>
         <p class="search-tip" v-if="parsing">正在解析，通常需要几秒钟，请稍候…</p>
 
@@ -73,173 +73,206 @@
       </div>
     </section>
 
-    <!-- ═══════════ 解析结果卡 ═══════════ -->
-    <section class="container result-section" id="result" v-if="videoInfo" ref="resultSection">
-      <div class="card result-card">
-        <div class="result-media">
-          <img v-if="videoInfo.thumbnail" :src="videoInfo.thumbnail" :alt="videoInfo.title" referrerpolicy="no-referrer">
-          <div v-else class="media-fallback">▶</div>
-          <span class="duration-badge" v-if="videoInfo.duration">{{ formatDuration(videoInfo.duration) }}</span>
-        </div>
-        <div class="result-body">
-          <div class="result-meta">
-            <span class="platform-badge">{{ videoInfo.platform }}</span>
-            <span class="uploader" v-if="videoInfo.uploader">UP：{{ videoInfo.uploader }}</span>
-          </div>
-          <h3 class="result-title">{{ videoInfo.title }}</h3>
+    <!-- ═══════════ 解析结果：视频信息 + AI 总结 同屏分栏 ═══════════ -->
+    <section class="container result-section" id="result" v-if="videoInfo || analysis.url" ref="resultSection" :aria-busy="textLoading || sumLoading">
+      <div class="result-split" :class="{ single: !videoInfo }">
 
-          <div class="quality-row">
-            <span class="quality-label">选择清晰度</span>
-            <div class="quality-pills">
-              <button v-for="q in videoInfo.qualities" :key="q.value"
-                      class="quality-pill" :class="{active: selectedQuality === q.value, audio: q.type === 'audio'}"
-                      @click="selectedQuality = q.value" :disabled="dl.status === 'downloading' || dl.status === 'queued'">
-                {{ q.label }}<em v-if="q.filesize_label">{{ q.filesize_label }}</em>
-              </button>
+        <!-- 左栏：视频信息 + 下载 -->
+        <div class="card result-card" v-if="videoInfo">
+          <div class="result-media">
+            <img v-if="videoInfo.thumbnail" :src="videoInfo.thumbnail" :alt="videoInfo.title" referrerpolicy="no-referrer">
+            <div v-else class="media-fallback">▶</div>
+            <span class="duration-badge" v-if="videoInfo.duration">{{ formatDuration(videoInfo.duration) }}</span>
+          </div>
+          <div class="result-body">
+            <div class="result-meta">
+              <span class="platform-badge">{{ videoInfo.platform }}</span>
+              <span class="uploader" v-if="videoInfo.uploader">UP：{{ videoInfo.uploader }}</span>
             </div>
-          </div>
+            <h3 class="result-title">{{ videoInfo.title }}</h3>
 
-          <!-- 下载操作区 -->
-          <div class="action-row">
-            <template v-if="!dl.taskId || dl.status === 'error' || dl.status === 'expired'">
-              <button class="btn btn-primary btn-lg" @click="startDownload">
-                ⬇ 立即下载
-              </button>
-              <button class="btn btn-outline btn-lg" @click="extractText" :disabled="textLoading">
-                <span v-if="!textLoading">📝 提取文本</span>
-                <span v-else class="loading-dot"><i></i><i></i><i></i></span>
-              </button>
-              <button class="btn btn-outline btn-lg btn-vip" @click="onSummarizeClick" :disabled="textLoading || sumLoading">
-                <span v-if="!sumLoading">✨ AI 总结 <small>免费</small></span>
-                <span v-else class="loading-dot"><i></i><i></i><i></i></span>
-              </button>
-            </template>
+            <div class="quality-row">
+              <span class="quality-label">选择清晰度</span>
+              <div class="quality-pills">
+                <button v-for="q in videoInfo.qualities" :key="q.value"
+                        class="quality-pill" :class="{active: selectedQuality === q.value, audio: q.type === 'audio'}"
+                        @click="selectedQuality = q.value" :disabled="dl.status === 'downloading' || dl.status === 'queued'">
+                  {{ q.label }}<em v-if="q.filesize_label">{{ q.filesize_label }}</em>
+                </button>
+              </div>
+            </div>
 
-            <template v-else-if="dl.status === 'done'">
-              <a class="btn btn-success btn-lg" :href="dl.download_url">💾 保存文件</a>
-              <button class="btn btn-ghost" @click="resetDownload">↻ 重新下载</button>
-            </template>
+            <!-- 下载操作区 -->
+            <div class="action-row">
+              <template v-if="!dl.taskId || dl.status === 'error' || dl.status === 'expired'">
+                <button class="btn btn-primary btn-lg btn-block" @click="startDownload">
+                  ⬇ 立即下载
+                </button>
+              </template>
 
-            <div v-else class="progress-wrap">
-              <div class="progress-head">
+              <template v-else-if="dl.status === 'done'">
+                <a class="btn btn-success btn-lg btn-block" :href="dl.download_url">💾 保存文件</a>
+                <button class="btn btn-ghost" @click="resetDownload">↻ 重新下载</button>
+              </template>
+
+              <div v-else class="progress-wrap">
+                <div class="progress-head">
                 <span class="status-badge" :class="dl.status">
                   {{ statusText(dl.status) }}
                 </span>
-                <span class="progress-num">{{ dl.progress }}%</span>
-              </div>
-              <div class="progress-bar"><div class="progress-inner" :style="{width: dl.progress + '%'}"></div></div>
-              <div class="progress-meta">
-                <span v-if="dl.speed">{{ dl.speed }}</span>
-                <span v-if="dl.eta">剩余 {{ dl.eta }}</span>
-                <span class="meta-hint">视频稍大时合并需要一点时间，请耐心等待</span>
-              </div>
-            </div>
-          </div>
-
-          <p class="file-hint">📁 文件在服务器保留 2 小时，下载完成后请及时保存到本地</p>
-          <p class="error-hint" v-if="dl.status === 'error'">⚠ {{ dl.error || '下载失败，请重试' }}</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- ═══════════ 自动分析结果 ═══════════ -->
-    <section class="container analysis-section" id="analysis" v-if="analysis.url" :aria-busy="textLoading || sumLoading">
-      <div class="analysis-heading">
-        <div>
-          <h2>视频内容分析</h2>
-          <p>{{ textResult.title || videoInfo?.title || '正在处理视频内容' }}</p>
-        </div>
-        <button v-if="analysis.status === 'error'" class="btn btn-outline btn-sm" @click="retryAnalysis" :disabled="textLoading || sumLoading">
-          {{ textResult.text && analysis.summaryRequested ? '重试 AI 总结和导图' : '重试提取文本' }}
-        </button>
-      </div>
-      <div class="analysis-grid" :class="{ 'text-only': !analysis.summaryRequested }">
-        <article class="card analysis-card">
-          <div class="analysis-card-head">
-            <h3>📝 提取文本</h3>
-            <span v-if="analysis.textStatus === 'done'" class="analysis-done">{{ textResult.chars }} 字 · 已完成</span>
-          </div>
-          <div v-if="textLoading" class="analysis-placeholder" role="status">
-            <span class="loading-dot"><i></i><i></i><i></i></span>
-            {{ analysis.textStatus === 'extracting' ? '正在提取字幕或转写语音…' : '等待提取文本…' }}
-            <p>没有公开字幕时会尝试语音转写，处理时间可能较长。</p>
-          </div>
-          <p v-else-if="analysis.textError" class="error-hint" role="alert">{{ analysis.textError }}</p>
-          <template v-else-if="textResult.text">
-            <p v-if="textResult.lang === 'zh-asr'" class="asr-note">ℹ️ 该视频没有平台字幕轨（画面中的字幕已压制进视频画面），以上文本由本地语音转写生成，内容与画面字幕基本一致</p>
-            <div class="text-content analysis-transcript">{{ textResult.text }}</div>
-            <div class="analysis-actions">
-              <button class="btn btn-outline btn-sm" @click="copyText">📋 复制文本</button>
-              <button class="btn btn-outline btn-sm" @click="downloadTxt">⬇ .txt</button>
-              <button class="btn btn-primary btn-sm" @click="onSummarizeClick" :disabled="sumLoading">✨ {{ sumResult.summary ? '查看 AI 总结' : 'AI 总结' }}</button>
-            </div>
-          </template>
-        </article>
-        <article class="card analysis-card" v-if="analysis.summaryRequested">
-          <div class="analysis-card-head">
-            <h3>✨ AI 总结</h3>
-            <span v-if="analysis.summaryStatus === 'done'" class="analysis-done">已完成</span>
-          </div>
-          <div v-if="sumLoading && !sumResult.article" class="analysis-placeholder" role="status">
-            <span class="loading-dot"><i></i><i></i><i></i></span>
-            {{ analysis.summaryStatus === 'generating' ? '正在生成 AI 总结、文章和思维导图…' : '等待生成 AI 总结和思维导图…' }}
-          </div>
-          <p v-if="analysis.summaryError" class="error-hint" role="alert">{{ analysis.summaryError }}</p>
-          <template v-if="sumResult.summary">
-            <div class="sum-summary-card"><p>{{ sumResult.summary }}</p></div>
-            <div class="sum-keywords" v-if="sumResult.keywords.length">
-              <span class="kw-chip" v-for="k in sumResult.keywords" :key="k">{{ k }}</span>
-            </div>
-          </template>
-          <template v-if="sumResult.article">
-            <div class="sum-section-title">📄 总结文章<span v-if="sumResult.articleDegraded" class="article-degraded">（AI 文章生成失败，已由章节要点整理）</span><span v-else-if="sumLoading" class="article-streaming">正在流式撰写…</span></div>
-            <div class="article-md" v-html="renderArticle(sumResult.article)"></div>
-            <div class="analysis-actions">
-              <button class="btn btn-outline btn-sm" @click="copyArticle">📋 复制文章</button>
-              <button class="btn btn-outline btn-sm" @click="downloadArticle">⬇ 文章 .md</button>
-            </div>
-          </template>
-          <template v-if="sumResult.summary">
-            <div class="sum-section-title">📋 章节要点</div>
-            <div class="sum-chapters analysis-chapters">
-              <div class="sum-chapter" v-for="(c, i) in sumResult.chapters" :key="i">
-                <div class="sum-ch-head">
-                  <button class="ts-btn" @click="copyTs(c.start)" title="复制时间点">[{{ formatDuration(c.start) }}]</button>
-                  <b>{{ c.title }}</b>
+                  <span class="progress-num">{{ dl.progress }}%</span>
                 </div>
-                <ul class="sum-points"><li v-for="(p, j) in c.points" :key="j">{{ p }}</li></ul>
+                <div class="progress-bar"><div class="progress-inner" :style="{width: dl.progress + '%'}"></div></div>
+                <div class="progress-meta">
+                  <span v-if="dl.speed">{{ dl.speed }}</span>
+                  <span v-if="dl.eta">剩余 {{ dl.eta }}</span>
+                  <span class="meta-hint">视频稍大时合并需要一点时间，请耐心等待</span>
+                </div>
               </div>
             </div>
-            <div class="analysis-actions">
-              <button class="btn btn-outline btn-sm" @click="copySummary">📋 复制总结</button>
-              <button class="btn btn-outline btn-sm" @click="downloadSummary('md')">⬇ .md</button>
-              <button class="btn btn-primary btn-sm" @click="showSumModal = true">💬 向视频提问</button>
-            </div>
-          </template>
-        </article>
-        <article class="card analysis-card analysis-mindmap" v-if="analysis.summaryRequested">
-          <div class="analysis-card-head">
-            <h3>🧠 思维导图</h3>
-            <div class="mm-card-actions" v-if="analysis.summaryStatus === 'done' && mm.nodes.length">
-              <button class="btn btn-outline btn-sm" @click="openMmFullscreen">⛶ 全屏查看</button>
-              <button class="btn btn-outline btn-sm" @click="downloadMmPng">⬇ 下载 PNG</button>
-            </div>
-            <span v-else-if="analysis.summaryStatus === 'done'" class="analysis-done">已完成 · 点击节点可折叠</span>
+
+            <p class="file-hint">📁 文件在服务器保留 2 小时，下载完成后请及时保存到本地</p>
+            <p class="error-hint" v-if="dl.status === 'error'">⚠ {{ dl.error || '下载失败，请重试' }}</p>
           </div>
-          <div v-if="sumLoading" class="analysis-placeholder" role="status">正在等待 AI 生成思维导图…</div>
-          <p v-else-if="analysis.summaryError" class="error-hint">{{ analysis.summaryError }}</p>
-          <div v-else-if="mm.nodes.length" class="mindmap-wrap">
-            <svg :viewBox="mm.viewBox" :style="{ width: mm.width + 'px', height: mm.height + 'px' }" role="img" aria-label="视频内容思维导图">
-              <path v-for="(l, i) in mm.links" :key="'l' + i" class="mm-link" :d="l.d"/>
-              <g v-for="n in mm.nodes" :key="'n' + n.id" class="mm-node"
-                 :class="'depth' + n.depth" :transform="`translate(${n.x}, ${n.y})`" @click="toggleMmNode(n)">
-                <rect x="0" y="-17" :width="n.w" height="34" rx="8"/>
-                <text x="12" y="5">{{ n.label }}</text>
-                <text v-if="n.childCount" class="mm-fold" :x="n.w - 16" y="5">{{ n.collapsed ? '+' : '−' }}</text>
-              </g>
-            </svg>
+        </div>
+
+        <!-- 右栏：AI 总结面板（同屏 Tab 切换） -->
+        <div class="card summary-panel">
+          <div class="sp-head">
+            <div class="sp-head-title">
+              <h3>✨ AI 视频总结</h3>
+              <span class="sp-status" :class="spStatusClass()">{{ spStatusText() }}</span>
+            </div>
+            <button v-if="analysis.status === 'error'" class="btn btn-outline btn-sm" @click="retryAnalysis" :disabled="textLoading || sumLoading">
+              {{ textResult.text ? '重试 AI 总结' : '重试提取' }}
+            </button>
           </div>
-        </article>
+
+          <div class="sp-tabs" role="tablist">
+            <button class="sp-tab" :class="{active: activeTab === 'summary'}" @click="activeTab = 'summary'">📄 总结</button>
+            <button class="sp-tab" :class="{active: activeTab === 'chapters'}" @click="activeTab = 'chapters'">📋 章节</button>
+            <button class="sp-tab" :class="{active: activeTab === 'mindmap'}" @click="activeTab = 'mindmap'">🧠 导图</button>
+            <button class="sp-tab" :class="{active: activeTab === 'text'}" @click="activeTab = 'text'">📝 文本</button>
+            <button class="sp-tab" :class="{active: activeTab === 'qa'}" @click="activeTab = 'qa'">💬 问答</button>
+          </div>
+
+          <div class="sp-body">
+            <!-- 文本提取中：所有 Tab 共用的阶段状态 -->
+            <div v-if="textLoading" class="analysis-placeholder" role="status">
+              <span class="loading-dot"><i></i><i></i><i></i></span>
+              {{ analysis.textStatus === 'extracting' ? '正在提取字幕或转写语音…' : '等待提取文本…' }}
+              <p>没有公开字幕时会尝试语音转写，处理时间可能较长。</p>
+            </div>
+
+            <!-- 📄 总结 -->
+            <template v-else-if="activeTab === 'summary'">
+              <p v-if="analysis.summaryError" class="error-hint" role="alert">{{ analysis.summaryError }}</p>
+              <div v-if="analysis.summaryRequested && sumLoading && !sumResult.article && !sumResult.summary" class="analysis-placeholder" role="status">
+                <span class="loading-dot"><i></i><i></i><i></i></span>
+                正在生成 AI 总结、文章和思维导图…
+              </div>
+              <template v-if="sumResult.summary">
+                <div class="sum-summary-card"><p>{{ sumResult.summary }}</p></div>
+                <div class="sum-keywords" v-if="sumResult.keywords.length">
+                  <span class="kw-chip" v-for="k in sumResult.keywords" :key="k">{{ k }}</span>
+                </div>
+              </template>
+              <template v-if="sumResult.article">
+                <div class="sum-section-title">📄 总结文章<span v-if="sumResult.articleDegraded" class="article-degraded">（AI 文章生成失败，已由章节要点整理）</span><span v-else-if="sumLoading" class="article-streaming">正在流式撰写…</span></div>
+                <div class="article-md" v-html="renderArticle(sumResult.article)"></div>
+                <div class="analysis-actions">
+                  <button class="btn btn-outline btn-sm" @click="copyArticle">📋 复制文章</button>
+                  <button class="btn btn-outline btn-sm" @click="downloadArticle">⬇ 文章 .md</button>
+                </div>
+              </template>
+              <div v-if="!analysis.summaryRequested && textResult.text" class="analysis-actions">
+                <button class="btn btn-primary btn-sm" @click="onSummarizeClick" :disabled="sumLoading">✨ 生成 AI 总结</button>
+              </div>
+            </template>
+
+            <!-- 📋 章节 -->
+            <template v-else-if="activeTab === 'chapters'">
+              <div v-if="sumLoading" class="analysis-placeholder" role="status">正在生成章节要点…</div>
+              <p v-else-if="analysis.summaryError" class="error-hint">{{ analysis.summaryError }}</p>
+              <template v-else-if="sumResult.summary">
+                <div class="sum-chapters">
+                  <div class="sum-chapter" v-for="(c, i) in sumResult.chapters" :key="i">
+                    <div class="sum-ch-head">
+                      <button class="ts-btn" @click="copyTs(c.start)" title="复制时间点">[{{ formatDuration(c.start) }}]</button>
+                      <b>{{ c.title }}</b>
+                    </div>
+                    <ul class="sum-points"><li v-for="(p, j) in c.points" :key="j">{{ p }}</li></ul>
+                  </div>
+                </div>
+                <div class="analysis-actions">
+                  <button class="btn btn-outline btn-sm" @click="copySummary">📋 复制总结</button>
+                  <button class="btn btn-outline btn-sm" @click="downloadSummary('md')">⬇ .md</button>
+                  <button class="btn btn-outline btn-sm" @click="downloadSummary('txt')">⬇ .txt</button>
+                </div>
+              </template>
+              <div v-else class="analysis-placeholder">生成 AI 总结后可查看带时间戳的章节要点。</div>
+            </template>
+
+            <!-- 🧠 导图 -->
+            <template v-else-if="activeTab === 'mindmap'">
+              <div class="analysis-card-head mm-card-actions-inline">
+                <span class="analysis-done" v-if="analysis.summaryStatus === 'done'">点击节点可折叠</span>
+                <div class="mm-card-actions" v-if="mm.nodes.length">
+                  <button class="btn btn-outline btn-sm" @click="openMmFullscreen">⛶ 全屏查看</button>
+                  <button class="btn btn-outline btn-sm" @click="downloadMmPng">⬇ 下载 PNG</button>
+                </div>
+              </div>
+              <div v-if="sumLoading" class="analysis-placeholder" role="status">正在等待 AI 生成思维导图…</div>
+              <p v-else-if="analysis.summaryError" class="error-hint">{{ analysis.summaryError }}</p>
+              <div v-else-if="mm.nodes.length" class="mindmap-wrap">
+                <svg :viewBox="mm.viewBox" :style="{ width: mm.width + 'px', height: mm.height + 'px' }" role="img" aria-label="视频内容思维导图">
+                  <path v-for="(l, i) in mm.links" :key="'l' + i" class="mm-link" :d="l.d"/>
+                  <g v-for="n in mm.nodes" :key="'n' + n.id" class="mm-node"
+                     :class="'depth' + n.depth" :transform="`translate(${n.x}, ${n.y})`" @click="toggleMmNode(n)">
+                    <rect x="0" y="-17" :width="n.w" height="34" rx="8"/>
+                    <text x="12" y="5">{{ n.label }}</text>
+                    <text v-if="n.childCount" class="mm-fold" :x="n.w - 16" y="5">{{ n.collapsed ? '+' : '−' }}</text>
+                  </g>
+                </svg>
+              </div>
+              <div v-else class="analysis-placeholder">生成 AI 总结后可查看思维导图。</div>
+            </template>
+
+            <!-- 📝 文本 -->
+            <template v-else-if="activeTab === 'text'">
+              <p v-if="analysis.textError" class="error-hint" role="alert">{{ analysis.textError }}</p>
+              <template v-if="textResult.text">
+                <p v-if="textResult.lang === 'zh-asr'" class="asr-note">ℹ️ 该视频没有平台字幕轨（画面中的字幕已压制进视频画面），以上文本由本地语音转写生成，内容与画面字幕基本一致</p>
+                <div class="text-content analysis-transcript">{{ textResult.text }}</div>
+                <div class="analysis-actions">
+                  <button class="btn btn-outline btn-sm" @click="copyText">📋 复制文本</button>
+                  <button class="btn btn-outline btn-sm" @click="downloadTxt">⬇ .txt</button>
+                </div>
+              </template>
+              <div v-else-if="!analysis.textError" class="analysis-placeholder">解析视频后自动提取文本。</div>
+            </template>
+
+            <!-- 💬 问答 -->
+            <template v-else-if="activeTab === 'qa'">
+              <template v-if="sumResult.sessionId">
+                <div class="qa-list">
+                  <p class="qa-hint" v-if="!qaMessages.length && !qaLoading">例如：这个视频的核心结论是什么？第 3 章的重点能再展开讲讲吗？</p>
+                  <div class="qa-msg" :class="m.role" v-for="(m, i) in qaMessages" :key="i">{{ m.content }}</div>
+                  <div class="qa-msg assistant qa-typing" v-if="qaLoading">思考中<span class="loading-dot"><i></i><i></i><i></i></span></div>
+                </div>
+                <div class="qa-input-row">
+                  <input v-model="qaInput" type="text" placeholder="基于视频内容提问…" maxlength="500"
+                         @keyup.enter="askQuestion" :disabled="qaLoading">
+                  <button class="btn btn-primary" @click="askQuestion" :disabled="qaLoading || !qaInput.trim()">发送</button>
+                </div>
+              </template>
+              <div v-else class="analysis-placeholder">
+                生成 AI 总结后可基于本视频字幕追问提问。
+                <p v-if="analysis.summaryRequested && analysis.status !== 'error' && sumLoading">总结生成中，请稍候…</p>
+              </div>
+            </template>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -320,24 +353,6 @@
     </div>
   </footer>
 
-  <!-- ═══════════ 文本提取弹窗 ═══════════ -->
-  <div class="modal-mask" v-if="showTextModal" @click.self="showTextModal = false">
-    <div class="modal text-modal">
-      <div class="modal-head">
-        <h3>📝 视频文本</h3>
-        <button class="modal-close" @click="showTextModal = false">✕</button>
-      </div>
-      <div class="modal-body">
-        <p class="text-meta">{{ textResult.title }} · {{ textResult.chars }} 字</p>
-        <div class="text-content">{{ textResult.text }}</div>
-      </div>
-      <div class="modal-foot">
-        <button class="btn btn-outline" @click="copyText">📋 复制文本</button>
-        <button class="btn btn-primary" @click="downloadTxt">⬇ 下载 .txt</button>
-      </div>
-    </div>
-  </div>
-
   <!-- ═══════════ 模拟支付弹窗 ═══════════ -->
   <div class="modal-mask" v-if="showPayModal" @click.self="showPayModal = false">
     <div class="modal pay-modal">
@@ -361,83 +376,6 @@
           <input v-model="vipCode" type="text" placeholder="请输入激活码，如 VIP2026">
           <button class="btn btn-outline" @click="activateVip">激活</button>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ═══════════ AI 总结弹窗（阶段4） ═══════════ -->
-  <div class="modal-mask" v-if="showSumModal" @click.self="showSumModal = false">
-    <div class="modal sum-modal">
-      <div class="modal-head">
-        <h3>✨ AI 视频总结</h3>
-        <button class="modal-close" @click="showSumModal = false">✕</button>
-      </div>
-      <div class="modal-body">
-        <p class="sum-meta">{{ sumResult.title }} · 字幕 {{ sumResult.chars }} 字 · {{ sumResult.model }} · {{ sumResult.elapsed }}s</p>
-
-        <div class="sum-summary-card"><p>{{ sumResult.summary }}</p></div>
-
-        <details class="transcript-details">
-          <summary>查看提取的完整文本（{{ sumResult.chars }} 字）</summary>
-          <pre class="transcript-content">{{ sumResult.transcript }}</pre>
-        </details>
-
-        <div class="sum-keywords" v-if="sumResult.keywords.length">
-          <span class="kw-chip" v-for="k in sumResult.keywords" :key="k">{{ k }}</span>
-        </div>
-
-        <template v-if="sumResult.article">
-          <div class="sum-section-title">📄 总结文章</div>
-          <div class="article-md" v-html="renderArticle(sumResult.article)"></div>
-        </template>
-
-        <div class="sum-section-title">📋 章节要点（点击时间戳可复制）</div>
-        <div class="sum-chapters">
-          <div class="sum-chapter" v-for="(c, i) in sumResult.chapters" :key="i">
-            <div class="sum-ch-head">
-              <button class="ts-btn" @click="copyTs(c.start)" title="复制时间点">[{{ formatDuration(c.start) }}]</button>
-              <b>{{ c.title }}</b>
-            </div>
-            <ul class="sum-points">
-              <li v-for="(p, j) in c.points" :key="j">{{ p }}</li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="sum-section-title">🧠 思维导图（点击节点可折叠）
-          <span class="mm-inline-actions">
-            <button class="btn btn-outline btn-sm" @click="openMmFullscreen">⛶ 全屏</button>
-            <button class="btn btn-outline btn-sm" @click="downloadMmPng">⬇ PNG</button>
-          </span>
-        </div>
-        <div class="mindmap-wrap">
-          <svg :viewBox="mm.viewBox" :style="{ width: mm.width + 'px', height: mm.height + 'px' }">
-            <path v-for="(l, i) in mm.links" :key="'l' + i" class="mm-link" :d="l.d"/>
-            <g v-for="n in mm.nodes" :key="'n' + n.id" class="mm-node"
-               :class="'depth' + n.depth" :transform="`translate(${n.x}, ${n.y})`" @click="toggleMmNode(n)">
-              <rect x="0" y="-17" :width="n.w" height="34" rx="8"/>
-              <text x="12" y="5">{{ n.label }}</text>
-              <text v-if="n.childCount" class="mm-fold" :x="n.w - 16" y="5">{{ n.collapsed ? '+' : '−' }}</text>
-            </g>
-          </svg>
-        </div>
-
-        <div class="sum-section-title">💬 向视频提问</div>
-        <div class="qa-list">
-          <p class="qa-hint" v-if="!qaMessages.length && !qaLoading">例如：这个视频的核心结论是什么？第 3 章的重点能再展开讲讲吗？</p>
-          <div class="qa-msg" :class="m.role" v-for="(m, i) in qaMessages" :key="i">{{ m.content }}</div>
-          <div class="qa-msg assistant qa-typing" v-if="qaLoading">思考中<span class="loading-dot"><i></i><i></i><i></i></span></div>
-        </div>
-        <div class="qa-input-row">
-          <input v-model="qaInput" type="text" placeholder="基于视频内容提问…" maxlength="500"
-                 @keyup.enter="askQuestion" :disabled="qaLoading">
-          <button class="btn btn-primary" @click="askQuestion" :disabled="qaLoading || !qaInput.trim()">发送</button>
-        </div>
-      </div>
-      <div class="modal-foot sum-foot">
-        <button class="btn btn-outline" @click="copySummary">📋 复制全文</button>
-        <button class="btn btn-outline" @click="downloadSummary('md')">⬇ .md</button>
-        <button class="btn btn-primary" @click="downloadSummary('txt')">⬇ .txt</button>
       </div>
     </div>
   </div>

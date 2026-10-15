@@ -51,7 +51,8 @@ const app = createApp({
 
     const textLoading = ref(false);
     const textResult = reactive({ title: "", text: "", chars: 0, lang: "" });
-    const showTextModal = ref(false);
+    // 同屏总结面板：当前激活 Tab（summary/chapters/mindmap/text/qa）
+    const activeTab = ref("summary");
     const analysis = reactive({
       taskId: "", url: "", status: "", textStatus: "", summaryStatus: "",
       textError: "", summaryError: "", summaryRequested: false,
@@ -127,8 +128,8 @@ const app = createApp({
         const q = info.qualities.find(x => x.value === "1080") || info.qualities[0];
         selectedQuality.value = q ? q.value : "";
         scrollTo("#result");
-        // 解析后只提取文本；总结和导图由用户点击 AI 总结后触发。
-        startAnalysis(info.webpage_url || u, version);
+        // 解析即总结：同屏右栏自动走 提取文本 → AI 总结 → 流式文章 全流程
+        startAnalysis(info.webpage_url || u, version, true);
       } catch (e) {
         toast(e.message, "error");
       } finally {
@@ -188,7 +189,8 @@ const app = createApp({
       if (parsing.value) return;
       const u = currentSource();
       if (analysis.url === u && textResult.text) {
-        showTextModal.value = true;
+        activeTab.value = "text";
+        scrollTo("#result");
         return;
       }
       if (!u) { toast("请先粘贴视频链接", "error"); return; }
@@ -199,7 +201,8 @@ const app = createApp({
         videoInfo.value = null;
         await startAnalysis(u);
       }
-      scrollTo("#analysis");
+      activeTab.value = "text";
+      scrollTo("#result");
     }
     async function copyText() {
       try {
@@ -246,13 +249,26 @@ const app = createApp({
 
     /* ---------- 阶段4：AI 总结 + AI 问答 + 思维导图 ---------- */
     const sumLoading = ref(false);
-    const showSumModal = ref(false);
     const sumResult = reactive({
       sessionId: "", title: "", chars: 0, model: "", elapsed: 0,
       summary: "", transcript: "", chapters: [], keywords: [], mindmap: null,
       article: "", articleStatus: "idle", articleDegraded: false,
     });
     let articleSource = null;   // 文章 SSE 订阅（EventSource）
+
+    // 右栏面板状态徽章
+    function spStatusText() {
+      if (analysis.status === "error") return "失败";
+      if (analysis.status === "extracting") return "提取文本中…";
+      if (analysis.status === "summarizing") return sumResult.article ? "文章流式生成中…" : "AI 总结生成中…";
+      if (analysis.status === "done") return analysis.summaryRequested ? "已完成" : "文本就绪";
+      return "排队中…";
+    }
+    function spStatusClass() {
+      if (analysis.status === "error") return "bad";
+      if (["extracting", "summarizing", "queued"].includes(analysis.status)) return "busy";
+      return "ok";
+    }
     const mm = reactive({ viewBox: "0 0 640 160", width: 640, height: 160, nodes: [], links: [] });
     const qaMessages = reactive([]);
     const qaInput = ref("");
@@ -279,10 +295,9 @@ const app = createApp({
         article: "", articleStatus: "idle", articleDegraded: false,
       });
       Object.assign(mm, { viewBox: "0 0 640 160", width: 640, height: 160, nodes: [], links: [] });
+      activeTab.value = "summary";
       textLoading.value = false;
       sumLoading.value = false;
-      showTextModal.value = false;
-      showSumModal.value = false;
       qaMessages.splice(0, qaMessages.length);
       qaInput.value = "";
       qaLoading.value = false;
@@ -479,7 +494,7 @@ const app = createApp({
       const u = currentSource();
       if (!u) { toast("请先粘贴视频链接", "error"); return; }
       if (analysis.url === u) {
-        if (sumResult.summary) { showSumModal.value = true; return; }
+        if (sumResult.summary) { activeTab.value = "summary"; scrollTo("#result"); return; }
         if (sumLoading.value || textLoading.value) return;
         if (analysis.summaryRequested && analysis.status === "error") {
           await retryAnalysis();
@@ -506,7 +521,8 @@ const app = createApp({
         videoInfo.value = null;
         await startAnalysis(u, analysisVersion, true);
       }
-      scrollTo("#analysis");
+      activeTab.value = "summary";
+      scrollTo("#result");
     }
 
     function ensureMindmap() {
@@ -696,7 +712,7 @@ const app = createApp({
       } finally {
         if (version === analysisVersion) qaLoading.value = false;
         setTimeout(() => {
-          const el = document.querySelector(".sum-modal .qa-list");
+          const el = document.querySelector(".sp-body .qa-list");
           if (el) el.scrollTop = el.scrollHeight;
         }, 30);
       }
@@ -764,11 +780,12 @@ const app = createApp({
     return {
       platforms, features, faqs,
       url, parsing, videoInfo, selectedQuality, resultSection, openFaq,
-      dl, textLoading, textResult, showTextModal, analysis, retryAnalysis,
+      dl, textLoading, textResult, analysis, retryAnalysis,
       showPayModal, payTab, vipCode, isVip, toasts,
       parseVideo, startDownload, resetDownload, extractText, copyText, downloadTxt,
       openPay, mockPaySuccess, activateVip, onSummarizeClick,
-      sumLoading, showSumModal, sumResult, mm, qaMessages, qaInput, qaLoading,
+      sumLoading, sumResult, mm, qaMessages, qaInput, qaLoading,
+      activeTab, spStatusText, spStatusClass,
       renderArticle, copyArticle, downloadArticle,
       mmView, openMmFullscreen, closeMmFullscreen, mmFitView,
       onMmPointerDown, onMmPointerMove, onMmPointerUp, onMmWheel, mmZoom, downloadMmPng,

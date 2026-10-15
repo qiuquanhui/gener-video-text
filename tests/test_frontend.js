@@ -49,43 +49,34 @@ const textTask = (id, status, extra = {}) => task(id, status, {
 const summary = title => ({ title, summary: `${title}摘要`, session_id: title, keywords: [],
   chapters: [{ title: "章节", start: 0, points: ["要点"] }], mindmap: null });
 
-test("parse only extracts text; clicking AI summary generates summary and map from the existing task", async () => {
-  let requested = false;
+test("parsing auto-runs the summary; the tab panel reuses results without duplicate requests", async () => {
   const h = harness(async (url, body) => {
     if (url === "/api/parse") return info("one");
     if (url === "/api/analyze") {
-      assert.equal(body.include_summary, false);
-      return textTask("1", "queued");
+      assert.equal(body.include_summary, true, "解析即总结");
+      return task("1", "queued");
     }
-    if (url.endsWith("/summarize")) { requested = true; return task("1", "summarizing", { text_result: text("one") }); }
-    return !requested ? textTask("1", "done", { text_result: text("one") })
-      : task("1", "done", { text_result: text("one"), summary_result: summary("one") });
+    return task("1", "done", { text_result: text("one"), summary_result: summary("one") });
   });
   h.state.url.value = "https://example.com/one";
   await h.state.parseVideo(); await flush();
   assert.equal(h.calls[1].url, "/api/analyze");
   assert.equal(h.state.textLoading.value, true);
+  assert.equal(h.state.analysis.summaryRequested, true);
   await h.poll();
   assert.equal(h.state.textResult.text, "one文本");
-  assert.equal(h.state.textLoading.value, false);
-  assert.equal(h.state.sumLoading.value, false);
-  assert.equal(h.state.analysis.summaryRequested, false);
-  assert.equal(h.state.sumResult.summary, "");
-  assert.equal(h.state.mm.nodes.length, 0);
-  assert.equal(requested, false);
-  await h.state.onSummarizeClick();
-  assert.equal(h.state.analysis.summaryRequested, true);
-  assert.equal(h.state.sumLoading.value, true);
-  await h.poll();
   assert.equal(h.state.sumResult.summary, "one摘要");
   assert.equal(h.state.mm.nodes.length, 3);
   assert.equal(h.state.sumLoading.value, false);
-  assert.equal(h.state.showSumModal.value, false);
+  assert.equal(h.state.spStatusText(), "已完成");
+  // 复看/入口复用：不产生新请求，切到对应 Tab
   const count = h.calls.length;
-  await h.state.extractText(); h.state.onSummarizeClick(); await flush();
-  assert.equal(h.calls.length, count, "view buttons must reuse generated results");
-  assert.equal(h.state.showTextModal.value, true);
-  assert.equal(h.state.showSumModal.value, true);
+  await h.state.onSummarizeClick(); await flush();
+  assert.equal(h.calls.length, count, "generated results must be reused");
+  assert.equal(h.state.activeTab.value, "summary");
+  await h.state.extractText(); await flush();
+  assert.equal(h.calls.length, count);
+  assert.equal(h.state.activeTab.value, "text");
 });
 
 test("a late result from the previous video cannot overwrite the newly parsed video", async () => {
@@ -112,19 +103,16 @@ test("a late result from the previous video cannot overwrite the newly parsed vi
 });
 
 test("AI failure retains text and retry uses the existing analysis task", async () => {
-  let retried = false, requested = false;
+  let retried = false;
   const h = harness(async url => {
     if (url === "/api/parse") return info("one");
-    if (url === "/api/analyze") return textTask("1", "queued");
-    if (url.endsWith("/summarize")) { requested = true; return task("1", "summarizing", { text_result: text("one") }); }
+    if (url === "/api/analyze") return task("1", "queued");
     if (url.endsWith("/retry")) { retried = true; return task("1", "summarizing", { text_result: text("one") }); }
-    if (!requested) return textTask("1", "done", { text_result: text("one") });
     return retried ? task("1", "done", { text_result: text("one"), summary_result: summary("one") })
       : task("1", "error", { text_result: text("one"), summary_status: "error", summary_error: "AI unavailable" });
   });
   h.state.url.value = "https://example.com/one";
   await h.state.parseVideo(); await flush(); await h.poll();
-  await h.state.onSummarizeClick(); await h.poll();
   assert.equal(h.state.textResult.text, "one文本");
   assert.equal(h.state.analysis.summaryError, "AI unavailable");
   await h.state.retryAnalysis(); await h.poll();

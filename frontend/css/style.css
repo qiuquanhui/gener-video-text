@@ -164,6 +164,39 @@ body {
 .quality-pill.audio.active { background: #7C3AED; border-color: #7C3AED; }
 
 .action-row { display: flex; align-items: center; gap: 14px; margin-top: 18px; flex-wrap: wrap; }
+
+/* ---------- 解析结果：视频信息 + AI 总结 同屏分栏 ---------- */
+.result-split { display: grid; grid-template-columns: 5fr 7fr; gap: 20px; align-items: stretch; }
+.result-split.single { grid-template-columns: 1fr; }
+.result-split .result-card { flex-direction: column; gap: 16px; }
+.result-split .result-media { width: 100%; }
+.result-split .result-body .file-hint { margin-top: auto; }
+
+/* 右栏：AI 总结面板（Tab 切换） */
+.summary-panel { padding: 0; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.sp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px 10px; flex-wrap: wrap; }
+.sp-head-title { display: flex; align-items: center; gap: 12px; min-width: 0; flex-wrap: wrap; }
+.sp-head-title h3 { font-size: 17px; }
+.sp-status { font-size: 12.5px; border-radius: 999px; padding: 3px 10px; font-weight: 700; }
+.sp-status.busy { background: var(--primary-light); color: var(--primary); }
+.sp-status.ok { background: #DCFCE7; color: var(--success-dark); }
+.sp-status.bad { background: #FEE2E2; color: var(--danger); }
+
+.sp-tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.sp-tabs::-webkit-scrollbar { display: none; }
+.sp-tab { background: none; border: none; padding: 10px 13px; font-size: 14px; color: var(--text-2);
+  cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; border-radius: 8px 8px 0 0; }
+.sp-tab:hover { color: var(--primary); background: var(--primary-light); }
+.sp-tab.active { color: var(--primary); font-weight: 700; border-bottom-color: var(--primary); }
+
+.sp-body { padding: 18px 20px 20px; min-height: 300px; flex: 1; }
+.sp-body .mindmap-wrap { max-height: 460px; }
+.sp-body .analysis-transcript { max-height: 460px; }
+.mm-card-actions-inline { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+
+@media (max-width: 980px) {
+  .result-split { grid-template-columns: 1fr; }
+}
 .btn-vip small { font-size: 11px; background: #FEF3C7; color: #B45309; border-radius: 4px; padding: 1px 5px; }
 
 .progress-wrap { flex: 1; min-width: 240px; }
@@ -419,12 +452,6 @@ body {
 
 /* 解析成功后的自动分析结果 */
 .auto-analysis-note { margin: 14px auto 0; color: var(--primary); font-size: 13.5px; }
-.analysis-section { margin-top: 28px; scroll-margin-top: 84px; }
-.analysis-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
-.analysis-heading h2 { font-size: 22px; }
-.analysis-heading p { color: var(--text-2); font-size: 13.5px; overflow-wrap: anywhere; }
-.analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
-.analysis-grid.text-only { grid-template-columns: 1fr; }
 .analysis-card { padding: 22px; min-width: 0; }
 .analysis-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .analysis-card-head h3 { font-size: 17px; }
@@ -466,7 +493,5 @@ body {
 .sum-section-title { display: flex; align-items: center; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 768px) {
-  .analysis-grid { grid-template-columns: 1fr; }
   .analysis-card { padding: 18px; }
-  .analysis-heading { align-items: flex-start; flex-wrap: wrap; }
 }
