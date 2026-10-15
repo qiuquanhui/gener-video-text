@@ -15,6 +15,7 @@ import shutil
 import uuid
 from pathlib import Path
 
+import bilibili_subs
 import config
 import douyin
 from downloader import YT_DLP, BusinessError, subtitle_browser_args
@@ -69,6 +70,17 @@ async def extract_cues(url: str) -> dict:
     """下载字幕并返回带时间轴的数据：{"title","lang","chars","cues"}。"""
     if douyin.is_douyin(url):
         raise BusinessError("抖音视频暂不支持字幕提取：分享通道不含字幕，AI 语音转写将在二期支持")
+
+    # B 站直连优先：两个轻量 HTTP 请求直取原生 JSON 字幕，免子进程；
+    # 拿不到（无字幕轨 / 接口要求登录）自动回退下方 yt-dlp 路径。
+    direct = await asyncio.to_thread(bilibili_subs.fetch_subtitle_cues, url)
+    if direct:
+        return {
+            "title": direct["title"],
+            "lang": direct["lang"],
+            "chars": sum(len(c["text"]) for c in direct["cues"]),
+            "cues": direct["cues"],
+        }
 
     workdir = config.DOWNLOAD_DIR / "subs" / uuid.uuid4().hex
     workdir.mkdir(parents=True, exist_ok=True)

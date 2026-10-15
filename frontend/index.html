@@ -166,6 +166,7 @@
           </div>
           <p v-else-if="analysis.textError" class="error-hint" role="alert">{{ analysis.textError }}</p>
           <template v-else-if="textResult.text">
+            <p v-if="textResult.lang === 'zh-asr'" class="asr-note">ℹ️ 该视频没有平台字幕轨（画面中的字幕已压制进视频画面），以上文本由本地语音转写生成，内容与画面字幕基本一致</p>
             <div class="text-content analysis-transcript">{{ textResult.text }}</div>
             <div class="analysis-actions">
               <button class="btn btn-outline btn-sm" @click="copyText">📋 复制文本</button>

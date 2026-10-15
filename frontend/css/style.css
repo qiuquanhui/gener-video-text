@@ -429,6 +429,7 @@ body {
 .analysis-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .analysis-card-head h3 { font-size: 17px; }
 .analysis-done { color: var(--success); font-size: 12.5px; }
+.asr-note { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: var(--primary-light); color: var(--text-2); font-size: 12.5px; line-height: 1.6; }
 .analysis-placeholder { color: var(--text-2); font-size: 14px; padding: 22px 0; }
 .analysis-placeholder .loading-dot { margin-right: 8px; color: var(--primary); }
 .analysis-placeholder p { margin-top: 10px; font-size: 12.5px; }
