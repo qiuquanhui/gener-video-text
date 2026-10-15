@@ -390,8 +390,10 @@ class DownloadService:
                     t["status"] = "expired"
                 elif t["status"] in ("error", "expired"):
                     self.tasks.pop(t["id"], None)
-        # 目录里的孤儿文件（失败任务残留等）
+        # 目录里的孤儿文件（失败任务残留等）；.gitkeep 用于维持目录结构，跳过
         for p in config.DOWNLOAD_DIR.iterdir():
+            if p.name == ".gitkeep":
+                continue
             if p.is_file() and now - p.stat().st_mtime > config.FILE_TTL_SECONDS:
                 try:
                     p.unlink()
