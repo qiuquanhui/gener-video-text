@@ -83,15 +83,15 @@ body {
 /* ═══════════ Hero ═══════════ */
 .hero {
   position: relative; overflow: hidden;
-  padding: 88px 0 64px;
+  padding: 40px 0 36px;
   background: linear-gradient(180deg, #EFF6FF 0%, var(--bg) 100%);
 }
 .hero-glow { position: absolute; border-radius: 50%; filter: blur(80px); opacity: .5; pointer-events: none; }
 .glow-1 { width: 420px; height: 420px; background: rgba(37, 99, 235, .16); top: -140px; left: -100px; }
 .glow-2 { width: 360px; height: 360px; background: rgba(139, 92, 246, .12); top: -60px; right: -80px; }
 .hero-inner { position: relative; text-align: center; }
-.hero-title { font-size: 48px; font-weight: 800; letter-spacing: 1px; }
-.hero-sub { margin: 18px 0 38px; font-size: 17px; color: var(--text-2); }
+.hero-title { font-size: 40px; font-weight: 800; letter-spacing: 1px; }
+.hero-sub { margin: 12px 0 24px; font-size: 15.5px; color: var(--text-2); }
 
 /* 胶囊搜索框（参考站核心样式） */
 .search-box {
@@ -109,18 +109,19 @@ body {
 }
 .search-input::placeholder { color: var(--text-3); }
 .search-btn { flex-shrink: 0; padding: 12px 34px; font-size: 16px; }
-.quick-actions { display: flex; justify-content: center; gap: 12px; margin: 16px auto 0; }
-.privacy-note { max-width: 720px; margin: 10px auto 0; color: var(--text-3); font-size: 12px; }
+.privacy-note { max-width: 720px; margin: 4px auto 0; color: var(--text-3); font-size: 12px; }
+.link-btn { background: none; border: none; padding: 0; color: var(--primary); font-size: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.link-btn:hover { color: var(--primary-dark); }
 .search-tip { margin-top: 14px; font-size: 13.5px; color: var(--primary); }
 
-.platforms { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 34px; }
+.platforms { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; }
 .platform-chip {
-  display: inline-flex; align-items: center; gap: 7px;
+  display: inline-flex; align-items: center; gap: 6px;
   background: #fff; border: 1px solid var(--border); border-radius: 999px;
-  padding: 7px 16px; font-size: 13.5px; color: var(--text-2); font-weight: 500;
+  padding: 5px 13px; font-size: 12.5px; color: var(--text-2); font-weight: 500;
 }
-.platform-dot { font-size: 15px; }
-.trust-line { margin-top: 22px; font-size: 13.5px; color: var(--text-3); }
+.platform-dot { font-size: 14px; }
+.trust-line { margin-top: 10px; font-size: 13px; color: var(--text-3); }
 .trust-line b { color: var(--primary); }
 
 /* ═══════════ 解析结果卡 ═══════════ */
@@ -364,15 +365,13 @@ body {
 @media (max-width: 768px) {
   .nav-menu { display: none; }
   .nav-inner { justify-content: space-between; gap: 12px; }
-  .hero { padding: 54px 0 58px; }
+  .hero { padding: 28px 0 30px; }
   .hero-title { font-size: 32px; }
-  .hero-sub { font-size: 14.5px; margin-bottom: 28px; }
+  .hero-sub { font-size: 14.5px; margin-bottom: 18px; }
   .search-box { flex-direction: row; flex-wrap: wrap; border-radius: 20px; padding: 10px; }
   .search-icon { display: none; }
   .search-input { width: 100%; padding: 10px 12px; }
   .search-btn { width: 100%; border-radius: 12px; }
-  .quick-actions { flex-direction: column; max-width: 720px; }
-  .quick-actions .btn { width: 100%; border-radius: 12px; }
   .result-section { margin-top: -20px; }
   .result-card { flex-direction: column; padding: 18px; }
   .result-media { width: 100%; }
@@ -451,7 +450,7 @@ body {
 .sum-foot { justify-content: flex-end; flex-wrap: wrap; }
 
 /* 解析成功后的自动分析结果 */
-.auto-analysis-note { margin: 14px auto 0; color: var(--primary); font-size: 13.5px; }
+.auto-analysis-note { margin: 10px auto 0; color: var(--primary); font-size: 13px; }
 .analysis-card { padding: 22px; min-width: 0; }
 .analysis-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .analysis-card-head h3 { font-size: 17px; }

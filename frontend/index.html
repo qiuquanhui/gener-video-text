@@ -50,18 +50,11 @@
             <span v-else class="loading-dot"><i></i><i></i><i></i></span>
           </button>
         </div>
-        <div class="quick-actions">
-          <button class="btn btn-outline" @click="extractText" :disabled="parsing || textLoading || !url.trim()">
-            <span v-if="!textLoading">📝 提取视频文本</span>
-            <span v-else class="loading-dot"><i></i><i></i><i></i></span>
-          </button>
-          <button class="btn btn-primary" @click="onSummarizeClick" :disabled="parsing || textLoading || sumLoading || !url.trim()">
-            <span v-if="!sumLoading">✨ AI 总结</span>
-            <span v-else class="loading-dot"><i></i><i></i><i></i></span>
-          </button>
-        </div>
-        <p class="auto-analysis-note">解析成功后自动提取文本并生成 AI 总结（文章+章节+导图），与视频信息同屏展示。</p>
-        <p class="privacy-note">不会读取或上传你的 B 站 Cookie。没有公开字幕时会尝试本机 Whisper 转写，音频不上传；使用 AI 时，文本和标题会发送给已配置的服务商，问答转写在内存保留 60 分钟。</p>
+        <p class="auto-analysis-note">
+          解析成功后自动生成 AI 总结（文章 · 章节 · 导图），与视频信息同屏展示 ·
+          <button class="link-btn" type="button" @click="extractText">仅提取文本</button>
+        </p>
+        <p class="privacy-note">不读取 Cookie；无字幕时本机转写（音频不上传），AI 仅接收字幕文本与标题</p>
         <p class="search-tip" v-if="parsing">正在解析，通常需要几秒钟，请稍候…</p>
 
         <div class="platforms">
