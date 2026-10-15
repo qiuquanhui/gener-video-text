@@ -250,7 +250,9 @@ const app = createApp({
     const sumResult = reactive({
       sessionId: "", title: "", chars: 0, model: "", elapsed: 0,
       summary: "", transcript: "", chapters: [], keywords: [], mindmap: null,
+      article: "", articleStatus: "idle", articleDegraded: false,
     });
+    let articleSource = null;   // 文章 SSE 订阅（EventSource）
     const mm = reactive({ viewBox: "0 0 640 160", width: 640, height: 160, nodes: [], links: [] });
     const qaMessages = reactive([]);
     const qaInput = ref("");
@@ -265,6 +267,7 @@ const app = createApp({
       analysisVersion++;
       clearTimeout(analysisTimer);
       analysisTimer = null;
+      closeArticleStream();
       Object.assign(analysis, {
         taskId: "", url: "", status: "", textStatus: "", summaryStatus: "",
         textError: "", summaryError: "", summaryRequested: false,
@@ -273,6 +276,7 @@ const app = createApp({
       Object.assign(sumResult, {
         sessionId: "", title: "", chars: 0, model: "", elapsed: 0,
         summary: "", transcript: "", chapters: [], keywords: [], mindmap: null,
+        article: "", articleStatus: "idle", articleDegraded: false,
       });
       Object.assign(mm, { viewBox: "0 0 640 160", width: 640, height: 160, nodes: [], links: [] });
       textLoading.value = false;
@@ -294,13 +298,115 @@ const app = createApp({
       textLoading.value = ["pending", "extracting"].includes(task.text_status);
       sumLoading.value = ["pending", "generating"].includes(task.summary_status);
       if (task.text_result) Object.assign(textResult, task.text_result);
+      // 文章：轮询通道与服务端任务字段同源（SSE 只是更高频的同源推送），直接覆盖
+      if (task.article_status !== undefined && task.article_status !== "idle") {
+        sumResult.article = task.article || "";
+        sumResult.articleStatus = task.article_status;
+        sumResult.articleDegraded = !!task.article_degraded;
+      }
+      if (task.summary_requested && !["done", "error"].includes(task.status)) openArticleStream(task.task_id);
       if (task.summary_result && !sumResult.summary) {
         Object.assign(sumResult, task.summary_result);
         sumResult.sessionId = task.summary_result.session_id || "";
+        if (task.summary_result.article) {
+          sumResult.article = task.summary_result.article;
+          sumResult.articleStatus = "done";
+          sumResult.articleDegraded = !!task.summary_result.article_degraded;
+        }
         ensureMindmap();
         layoutMindmap();
         toast("文本、AI 总结和思维导图已生成 ✨", "success");
       }
+    }
+
+    /* ---------- 总结文章：SSE 流式订阅 + markdown 轻量渲染 ---------- */
+
+    function openArticleStream(taskId) {
+      if (articleSource && articleSource._taskId === taskId) return;
+      closeArticleStream();
+      if (typeof EventSource === "undefined") return; // 极老浏览器退化为轮询展示
+      const version = analysisVersion;
+      const es = new EventSource(`/api/analysis/${taskId}/article-stream`);
+      es._taskId = taskId;
+      es.onmessage = (ev) => {
+        if (version !== analysisVersion) { es.close(); return; }
+        let d;
+        try { d = JSON.parse(ev.data); } catch { return; }
+        if (typeof d.text === "string" && d.text) sumResult.article = d.text;
+        sumResult.articleStatus = d.status;
+        sumResult.articleDegraded = !!d.degraded;
+        if (d.status === "done" || d.status === "error") es.close();
+      };
+      es.onerror = () => { /* 断线重连交给 EventSource；任务终态后由 onmessage 关闭 */ };
+      articleSource = es;
+    }
+
+    function closeArticleStream() {
+      if (articleSource) { articleSource.close(); articleSource = null; }
+    }
+
+    // 零依赖 markdown 渲染：仅支持文章 prompt 约定的子集（## 标题 / **加粗** / - 列表）。
+    // 先整体 HTML 转义再变换；流式半截内容（未闭合 ** 等）按原样展示，不报错。
+    function renderArticle(md) {
+      const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const inline = (s) => esc(s).replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+      const out = [];
+      let inList = false, para = [];
+      const flushPara = () => { if (para.length) { out.push(`<p>${para.join("<br>")}</p>`); para = []; } };
+      const flushList = () => { if (inList) { out.push("</ul>"); inList = false; } };
+      for (const raw of String(md || "").split(/\r?\n/)) {
+        const line = raw.trimEnd();
+        const h = line.match(/^(#{2,5})\s+(.+)$/);
+        const li = line.match(/^\s*[-*]\s+(.+)$/);
+        if (h) {
+          flushPara(); flushList();
+          const level = Math.min(h[1].length + 2, 6); // ## 映射 h4，视觉贴合卡片
+          out.push(`<h${level}>${inline(h[2])}</h${level}>`);
+        } else if (li) {
+          flushPara();
+          if (!inList) { out.push("<ul>"); inList = true; }
+          out.push(`<li>${inline(li[1])}</li>`);
+        } else if (!line.trim()) {
+          flushPara(); flushList();
+        } else {
+          flushList();
+          para.push(inline(line));
+        }
+      }
+      flushPara(); flushList();
+      return out.join("");
+    }
+
+    function articleFilename() {
+      return (sumResult.title || "AI总结文章").slice(0, 50).replace(/[\\/:*?"<>|]/g, "_") + "-AI文章.md";
+    }
+
+    async function copyArticle() {
+      const text = sumResult.article || "";
+      if (!text) { toast("文章还没有生成好", "error"); return; }
+      try {
+        await navigator.clipboard.writeText(text);
+        toast("文章已复制到剪贴板", "success");
+      } catch {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+        toast("文章已复制到剪贴板", "success");
+      }
+    }
+
+    function downloadArticle() {
+      const text = sumResult.article || "";
+      if (!text) { toast("文章还没有生成好", "error"); return; }
+      const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = articleFilename();
+      a.click();
+      URL.revokeObjectURL(a.href);
     }
 
     function scheduleAnalysisPoll(version, taskId) {
@@ -456,9 +562,119 @@ const app = createApp({
     }
 
     function toggleMmNode(n) {
+      if (mmDrag.moved) return; // 拖拽平移后松手误触的 click 不折叠
       if (!n.childCount) return;
       n._ref._collapsed = !n._ref._collapsed;
       layoutMindmap();
+    }
+
+    /* ---------- 思维导图：全屏覆盖层 + 拖拽平移/缩放 + PNG 下载 ---------- */
+
+    const mmView = reactive({ fullscreen: false, x: 0, y: 0, scale: 1 });
+    const mmDrag = { on: false, moved: false, sx: 0, sy: 0, bx: 0, by: 0 };
+
+    function mmFitView() {
+      const vw = window.innerWidth || 1200, vh = window.innerHeight || 800;
+      mmView.scale = Math.max(0.2, Math.min(1, (vw - 80) / (mm.width || 1), (vh - 180) / (mm.height || 1)));
+      mmView.x = (vw - mm.width * mmView.scale) / 2;
+      mmView.y = (vh - mm.height * mmView.scale) / 2;
+    }
+
+    function mmOnKey(e) { if (e.key === "Escape") closeMmFullscreen(); }
+
+    function openMmFullscreen() {
+      if (!mm.nodes.length) return;
+      mmView.fullscreen = true;
+      mmFitView();
+      window.addEventListener("keydown", mmOnKey);
+    }
+
+    function closeMmFullscreen() {
+      mmView.fullscreen = false;
+      window.removeEventListener("keydown", mmOnKey);
+    }
+
+    function onMmPointerDown(e) {
+      mmDrag.on = true; mmDrag.moved = false;
+      mmDrag.sx = e.clientX; mmDrag.sy = e.clientY;
+      mmDrag.bx = mmView.x; mmDrag.by = mmView.y;
+      if (e.currentTarget.setPointerCapture) {
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 旧浏览器忽略 */ }
+      }
+    }
+
+    function onMmPointerMove(e) {
+      if (!mmDrag.on) return;
+      const dx = e.clientX - mmDrag.sx, dy = e.clientY - mmDrag.sy;
+      if (Math.abs(dx) + Math.abs(dy) > 6) mmDrag.moved = true;
+      mmView.x = mmDrag.bx + dx;
+      mmView.y = mmDrag.by + dy;
+    }
+
+    function onMmPointerUp() { mmDrag.on = false; }
+
+    function mmZoomAt(factor, cx, cy) {
+      const s0 = mmView.scale;
+      const s1 = Math.min(3, Math.max(0.15, s0 * factor));
+      mmView.x = cx - (cx - mmView.x) * (s1 / s0); // 以指针为锚点缩放
+      mmView.y = cy - (cy - mmView.y) * (s1 / s0);
+      mmView.scale = s1;
+    }
+
+    function onMmWheel(e) {
+      e.preventDefault();
+      mmZoomAt(e.deltaY < 0 ? 1.12 : 0.89, e.clientX, e.clientY);
+    }
+
+    function mmZoom(factor) {
+      mmZoomAt(factor, (window.innerWidth || 1200) / 2, (window.innerHeight || 800) / 2);
+    }
+
+    // 生成独立 SVG 字符串（内嵌样式，不依赖页面 CSS），供 PNG 导出使用
+    function mmSvgString() {
+      const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const parts = [
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${mm.width}" height="${mm.height}" viewBox="${mm.viewBox}" font-family="-apple-system,'Segoe UI','Microsoft YaHei',sans-serif">`,
+        "<style>.mm-link{fill:none;stroke:#C7D2FE;stroke-width:1.6}.mm-node rect{fill:#fff;stroke:#93C5FD;stroke-width:1.2}.mm-node text{font-size:12.5px;fill:#1F2937}.mm-node.depth0 rect{fill:#2563EB;stroke:#1D4ED8}.mm-node.depth0 text{fill:#fff;font-weight:700}.mm-node.depth1 rect{fill:#EFF6FF}.mm-fold{fill:#2563EB;font-weight:700}.mm-node.depth0 .mm-fold{fill:#fff}</style>",
+        `<rect width="${mm.width}" height="${mm.height}" fill="#ffffff"/>`,
+      ];
+      for (const l of mm.links) parts.push(`<path class="mm-link" d="${l.d}"/>`);
+      for (const n of mm.nodes) {
+        parts.push(`<g class="mm-node depth${n.depth}" transform="translate(${n.x},${n.y})"><rect x="0" y="-17" width="${n.w}" height="34" rx="8"/><text x="12" y="5">${esc(n.label)}</text>`);
+        if (n.childCount) parts.push(`<text class="mm-fold" x="${n.w - 16}" y="5">${n.collapsed ? "+" : "−"}</text>`);
+        parts.push("</g>");
+      }
+      parts.push("</svg>");
+      return parts.join("");
+    }
+
+    function downloadMmPng() {
+      if (!mm.nodes.length) { toast("思维导图还没有生成", "error"); return; }
+      const scale = 2, pad = 24; // 2 倍采样保证文字清晰
+      const blob = new Blob([mmSvgString()], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = (mm.width + pad * 2) * scale;
+        canvas.height = (mm.height + pad * 2) * scale;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, pad * scale, pad * scale, mm.width * scale, mm.height * scale);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((b) => {
+          if (!b) { toast("导图图片生成失败", "error"); return; }
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(b);
+          a.download = (sumResult.title || "思维导图").slice(0, 50).replace(/[\\/:*?"<>|]/g, "_") + "-思维导图.png";
+          a.click();
+          URL.revokeObjectURL(a.href);
+          toast("思维导图图片已下载 🖼", "success");
+        }, "image/png");
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); toast("导图图片生成失败", "error"); };
+      img.src = url;
     }
 
     async function askQuestion() {
@@ -495,6 +711,7 @@ const app = createApp({
     function summaryToText() {
       const r = sumResult;
       let out = `【${r.title}】AI 视频总结\n\n摘要：${r.summary}\n\n关键词：${(r.keywords || []).join("、")}\n\n`;
+      if (r.article) out += `【总结文章】\n${r.article}\n\n`;
       (r.chapters || []).forEach(c => {
         out += `[${formatDuration(c.start)}] ${c.title}\n`;
         (c.points || []).forEach(p => { out += `  - ${p}\n`; });
@@ -508,6 +725,7 @@ const app = createApp({
       const r = sumResult;
       let out = `# ${r.title} · AI 视频总结\n\n> 摘要：${r.summary}\n\n`;
       if (r.keywords && r.keywords.length) out += `**关键词**：${r.keywords.join("、")}\n\n`;
+      if (r.article) out += `${r.article}\n\n---\n\n`;
       (r.chapters || []).forEach((c, i) => {
         out += `## ${i + 1}. [${formatDuration(c.start)}] ${c.title}\n\n`;
         (c.points || []).forEach(p => { out += `- ${p}\n`; });
@@ -551,7 +769,11 @@ const app = createApp({
       parseVideo, startDownload, resetDownload, extractText, copyText, downloadTxt,
       openPay, mockPaySuccess, activateVip, onSummarizeClick,
       sumLoading, showSumModal, sumResult, mm, qaMessages, qaInput, qaLoading,
+      renderArticle, copyArticle, downloadArticle,
+      mmView, openMmFullscreen, closeMmFullscreen, mmFitView,
+      onMmPointerDown, onMmPointerMove, onMmPointerUp, onMmWheel, mmZoom, downloadMmPng,
       askQuestion, copyTs, copySummary, downloadSummary, toggleMmNode,
+      summaryToMd, summaryToText,
       formatDuration, statusText, scrollTo,
     };
   },

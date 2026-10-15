@@ -14,17 +14,25 @@ import analysis_api
 import main
 import summarizer
 from downloader import BusinessError
+from fastapi import HTTPException
 
 META = {"title": "测试视频", "lang": "zh", "chars": 8,
         "cues": [{"start": 0, "end": 2, "text": "先提取文本"}]}
 SUMMARY = {"summary": "视频摘要", "chapters": [{"title": "第一章", "start": 0, "points": ["先提取文本"]}],
            "mindmap": {"label": "主题", "children": [{"label": "要点"}]}, "session_id": "session"}
+ARTICLE = "## 测试文章\n- 要点"
+
+
+def fake_article(meta, notify):
+    notify(ARTICLE)  # 模拟流式回调：一次性送出全文
+    return ARTICLE
 
 
 class AnalysisTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.service = analysis_api.AnalysisService()
         self.rate = patch.object(summarizer, "check_rate_limit").start()
+        patch.object(summarizer, "generate_article_stream", side_effect=fake_article).start()
         self.addCleanup(patch.stopall)
 
     async def asyncTearDown(self):
@@ -153,6 +161,49 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
         }
         self.service.cleanup()
         self.assertEqual(list(self.service.tasks), ["active"])
+
+    async def test_article_streams_and_included_in_result(self):
+        with patch.object(analysis_api, "extract_cues", AsyncMock(return_value=META)), \
+                patch.object(summarizer, "summarize", return_value=SUMMARY):
+            task = self.service.start("https://example.com/video", "test", include_summary=True)
+            result = await self.wait_status(task["task_id"], "done")
+            self.assertEqual(result["article_status"], "done")
+            self.assertEqual(result["article"], ARTICLE)
+            self.assertFalse(result["article_degraded"])
+            self.assertEqual(result["summary_result"]["article"], ARTICLE)
+            self.assertFalse(result["summary_result"]["article_degraded"])
+
+    async def test_article_failure_degrades_to_chapter_digest(self):
+        with patch.object(analysis_api, "extract_cues", AsyncMock(return_value=META)), \
+                patch.object(summarizer, "summarize", return_value=SUMMARY), \
+                patch.object(summarizer, "generate_article_stream", return_value=None):
+            task = self.service.start("https://example.com/video", "test", include_summary=True)
+            result = await self.wait_status(task["task_id"], "done")
+            self.assertTrue(result["article_degraded"])
+            self.assertIn("视频摘要", result["article"])
+            self.assertIn("## 第一章", result["article"])
+            self.assertIn("- 先提取文本", result["article"])
+
+    async def test_article_stream_endpoint_snapshots_and_closes(self):
+        with patch.object(analysis_api, "extract_cues", AsyncMock(return_value=META)), \
+                patch.object(summarizer, "summarize", return_value=SUMMARY):
+            task = self.service.start("https://example.com/video", "test", include_summary=True)
+            done = await self.wait_status(task["task_id"], "done")
+            with patch.object(analysis_api, "service", self.service):
+                resp = await analysis_api.article_stream(done["task_id"])
+                self.assertEqual(resp.media_type, "text/event-stream")
+                body = "".join([chunk async for chunk in resp.body_iterator])
+            messages = [json.loads(line[5:]) for line in body.splitlines()
+                        if line.startswith("data: ")]
+            self.assertTrue(messages, "SSE 至少送出一条消息")
+            self.assertEqual(messages[-1]["status"], "done")
+            self.assertEqual(messages[-1]["text"], ARTICLE)
+            self.assertFalse(messages[-1]["degraded"])
+
+    async def test_article_stream_endpoint_404_for_missing_task(self):
+        with patch.object(analysis_api, "service", self.service):
+            with self.assertRaises(HTTPException):
+                await analysis_api.article_stream("missing")
 
     async def test_api_routes_validate_urls_and_report_missing_tasks(self):
         async def request(method, path, body=None):

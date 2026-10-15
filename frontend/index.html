@@ -180,16 +180,26 @@
             <h3>✨ AI 总结</h3>
             <span v-if="analysis.summaryStatus === 'done'" class="analysis-done">已完成</span>
           </div>
-          <div v-if="sumLoading" class="analysis-placeholder" role="status">
+          <div v-if="sumLoading && !sumResult.article" class="analysis-placeholder" role="status">
             <span class="loading-dot"><i></i><i></i><i></i></span>
-            {{ analysis.summaryStatus === 'generating' ? '正在生成 AI 总结和思维导图…' : '等待生成 AI 总结和思维导图…' }}
+            {{ analysis.summaryStatus === 'generating' ? '正在生成 AI 总结、文章和思维导图…' : '等待生成 AI 总结和思维导图…' }}
           </div>
-          <p v-else-if="analysis.summaryError" class="error-hint" role="alert">{{ analysis.summaryError }}</p>
-          <template v-else-if="sumResult.summary">
+          <p v-if="analysis.summaryError" class="error-hint" role="alert">{{ analysis.summaryError }}</p>
+          <template v-if="sumResult.summary">
             <div class="sum-summary-card"><p>{{ sumResult.summary }}</p></div>
             <div class="sum-keywords" v-if="sumResult.keywords.length">
               <span class="kw-chip" v-for="k in sumResult.keywords" :key="k">{{ k }}</span>
             </div>
+          </template>
+          <template v-if="sumResult.article">
+            <div class="sum-section-title">📄 总结文章<span v-if="sumResult.articleDegraded" class="article-degraded">（AI 文章生成失败，已由章节要点整理）</span><span v-else-if="sumLoading" class="article-streaming">正在流式撰写…</span></div>
+            <div class="article-md" v-html="renderArticle(sumResult.article)"></div>
+            <div class="analysis-actions">
+              <button class="btn btn-outline btn-sm" @click="copyArticle">📋 复制文章</button>
+              <button class="btn btn-outline btn-sm" @click="downloadArticle">⬇ 文章 .md</button>
+            </div>
+          </template>
+          <template v-if="sumResult.summary">
             <div class="sum-section-title">📋 章节要点</div>
             <div class="sum-chapters analysis-chapters">
               <div class="sum-chapter" v-for="(c, i) in sumResult.chapters" :key="i">
@@ -210,7 +220,11 @@
         <article class="card analysis-card analysis-mindmap" v-if="analysis.summaryRequested">
           <div class="analysis-card-head">
             <h3>🧠 思维导图</h3>
-            <span v-if="analysis.summaryStatus === 'done'" class="analysis-done">已完成 · 点击节点可折叠</span>
+            <div class="mm-card-actions" v-if="analysis.summaryStatus === 'done' && mm.nodes.length">
+              <button class="btn btn-outline btn-sm" @click="openMmFullscreen">⛶ 全屏查看</button>
+              <button class="btn btn-outline btn-sm" @click="downloadMmPng">⬇ 下载 PNG</button>
+            </div>
+            <span v-else-if="analysis.summaryStatus === 'done'" class="analysis-done">已完成 · 点击节点可折叠</span>
           </div>
           <div v-if="sumLoading" class="analysis-placeholder" role="status">正在等待 AI 生成思维导图…</div>
           <p v-else-if="analysis.summaryError" class="error-hint">{{ analysis.summaryError }}</p>
@@ -372,6 +386,11 @@
           <span class="kw-chip" v-for="k in sumResult.keywords" :key="k">{{ k }}</span>
         </div>
 
+        <template v-if="sumResult.article">
+          <div class="sum-section-title">📄 总结文章</div>
+          <div class="article-md" v-html="renderArticle(sumResult.article)"></div>
+        </template>
+
         <div class="sum-section-title">📋 章节要点（点击时间戳可复制）</div>
         <div class="sum-chapters">
           <div class="sum-chapter" v-for="(c, i) in sumResult.chapters" :key="i">
@@ -385,7 +404,12 @@
           </div>
         </div>
 
-        <div class="sum-section-title">🧠 思维导图（点击节点可折叠）</div>
+        <div class="sum-section-title">🧠 思维导图（点击节点可折叠）
+          <span class="mm-inline-actions">
+            <button class="btn btn-outline btn-sm" @click="openMmFullscreen">⛶ 全屏</button>
+            <button class="btn btn-outline btn-sm" @click="downloadMmPng">⬇ PNG</button>
+          </span>
+        </div>
         <div class="mindmap-wrap">
           <svg :viewBox="mm.viewBox" :style="{ width: mm.width + 'px', height: mm.height + 'px' }">
             <path v-for="(l, i) in mm.links" :key="'l' + i" class="mm-link" :d="l.d"/>
@@ -415,6 +439,39 @@
         <button class="btn btn-outline" @click="downloadSummary('md')">⬇ .md</button>
         <button class="btn btn-primary" @click="downloadSummary('txt')">⬇ .txt</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 思维导图全屏覆盖层 ═══════════ -->
+  <div class="mm-fullscreen" v-if="mmView.fullscreen">
+    <div class="mm-fs-head">
+      <div class="mm-fs-title">
+        <h3>🧠 {{ sumResult.title || '思维导图' }}</h3>
+        <span class="mm-fs-hint">拖拽平移 · 滚轮缩放 · 点击节点折叠</span>
+      </div>
+      <div class="mm-fs-actions">
+        <button class="btn btn-outline btn-sm" @click="mmZoom(1.25)">＋</button>
+        <button class="btn btn-outline btn-sm" @click="mmZoom(0.8)">－</button>
+        <button class="btn btn-outline btn-sm" @click="mmFitView">⛶ 适应屏幕</button>
+        <button class="btn btn-outline btn-sm" @click="downloadMmPng">⬇ PNG</button>
+        <button class="btn btn-primary btn-sm" @click="closeMmFullscreen">✕ 退出全屏</button>
+      </div>
+    </div>
+    <div class="mm-stage"
+         @pointerdown="onMmPointerDown" @pointermove="onMmPointerMove"
+         @pointerup="onMmPointerUp" @pointercancel="onMmPointerUp"
+         @wheel.prevent="onMmWheel">
+      <svg :viewBox="mm.viewBox"
+           :style="{ width: mm.width + 'px', height: mm.height + 'px', transform: `translate(${mmView.x}px, ${mmView.y}px) scale(${mmView.scale})`, transformOrigin: '0 0' }"
+           role="img" aria-label="视频内容思维导图（全屏）">
+        <path v-for="(l, i) in mm.links" :key="'l' + i" class="mm-link" :d="l.d"/>
+        <g v-for="n in mm.nodes" :key="'n' + n.id" class="mm-node"
+           :class="'depth' + n.depth" :transform="`translate(${n.x}, ${n.y})`" @click="toggleMmNode(n)">
+          <rect x="0" y="-17" :width="n.w" height="34" rx="8"/>
+          <text x="12" y="5">{{ n.label }}</text>
+          <text v-if="n.childCount" class="mm-fold" :x="n.w - 16" y="5">{{ n.collapsed ? '+' : '−' }}</text>
+        </g>
+      </svg>
     </div>
   </div>
 

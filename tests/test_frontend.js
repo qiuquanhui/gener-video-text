@@ -148,3 +148,67 @@ test("the standalone extract-text button never requests AI", async () => {
   assert.equal(h.state.sumResult.summary, "");
   assert.equal(h.state.mm.nodes.length, 0);
 });
+
+test("article markdown renderer supports the constrained subset and escapes html", async () => {
+  const h = harness(async () => ({}));
+  const html = h.state.renderArticle(
+    "## 小节标题\n段落有**加粗**和 <script>标签\n\n- 要点一\n- 要点二\n### 深层标题");
+  assert.ok(html.includes("<h4>小节标题</h4>"));
+  assert.ok(html.includes("<strong>加粗</strong>"));
+  assert.ok(!html.includes("<script>"));
+  assert.ok(html.includes("&lt;script&gt;"));
+  assert.ok(html.includes("<ul><li>要点一</li><li>要点二</li></ul>"));
+  assert.ok(html.includes("<h5>深层标题</h5>"));
+  assert.equal(typeof h.state.renderArticle("半截**加粗"), "string", "流式半截内容不报错");
+  assert.equal(h.state.renderArticle(""), "");
+});
+
+test("summary exports embed the generated article", async () => {
+  const article = "## 文章小节\n- 文章要点";
+  let requested = false;
+  const h = harness(async url => {
+    if (url === "/api/parse") return info("one");
+    if (url === "/api/analyze") return textTask("1", "queued");
+    if (url.endsWith("/summarize")) { requested = true; return task("1", "summarizing", { text_result: text("one") }); }
+    if (!requested) return textTask("1", "done", { text_result: text("one") });
+    return task("1", "done", {
+      text_result: text("one"),
+      summary_result: { ...summary("one"), article, article_degraded: false },
+      article, article_status: "done",
+    });
+  });
+  h.state.url.value = "https://example.com/one";
+  await h.state.parseVideo(); await flush(); await h.poll();
+  await h.state.onSummarizeClick(); await h.poll();
+  assert.ok(h.state.sumResult.article.includes("文章小节"));
+  assert.equal(h.state.sumResult.articleStatus, "done");
+  assert.ok(h.state.summaryToMd().includes("文章小节"));
+  const txt = h.state.summaryToText();
+  assert.ok(txt.includes("【总结文章】"));
+  assert.ok(txt.includes("文章要点"));
+});
+
+test("polling fallback surfaces streaming article text", async () => {
+  let polls = 0;
+  const h = harness(async url => {
+    if (url === "/api/analyze") return task("1", "queued");
+    polls += 1;
+    if (polls === 1) {
+      return task("1", "summarizing", {
+        text_result: text("one"), article_status: "streaming", article: "## 半截",
+      });
+    }
+    return task("1", "done", {
+      text_result: text("one"),
+      summary_result: { ...summary("one"), article: "## 完整文章", article_degraded: false },
+      article: "## 完整文章", article_status: "done",
+    });
+  });
+  h.state.url.value = "https://example.com/one";
+  await h.state.extractText(); await h.poll();
+  assert.equal(h.state.sumResult.article, "## 半截");
+  assert.equal(h.state.sumResult.articleStatus, "streaming");
+  await h.poll();
+  assert.equal(h.state.sumResult.article, "## 完整文章");
+  assert.equal(h.state.sumResult.articleStatus, "done");
+});

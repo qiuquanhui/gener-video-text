@@ -89,8 +89,8 @@ def _chat(messages: list[dict], json_mode: bool = False) -> str:
         "temperature": 0.3,
         "max_tokens": s["LLM_MAX_TOKENS"],
     }
-    # DeepSeek OpenAI-compatible endpoint supports constrained JSON output.
-    if json_mode and "api.deepseek.com" in s["LLM_BASE_URL"].lower():
+    # DeepSeek / 智谱的 OpenAI 兼容端点均支持约束 JSON 输出，显著降低格式重试率
+    if json_mode and any(h in s["LLM_BASE_URL"].lower() for h in ("api.deepseek.com", "bigmodel.cn")):
         payload["response_format"] = {"type": "json_object"}
     body = json.dumps(payload).encode("utf-8")
     url = s["LLM_BASE_URL"].rstrip("/") + "/chat/completions"
@@ -277,7 +277,7 @@ def summarize(meta: dict) -> dict:
     ]
 
     last_err = None
-    for attempt in range(2):
+    for attempt in range(3):  # 格式重试：偶发不合规 JSON 多给两次机会
         raw = _chat(messages, json_mode=True)
         try:
             result = _normalize_summary(_extract_json(raw), meta["title"])
@@ -303,6 +303,115 @@ def summarize(meta: dict) -> dict:
         "model": settings["LLM_MODEL"],
     })
     return result
+
+
+# ---------- AI 总结文章（SSE 流式） ----------
+
+_ARTICLE_SYSTEM = (
+    "你是专业的视频内容编辑，擅长把视频字幕转写整理为一篇流畅易读的中文总结文章。"
+    "直接输出 markdown 正文，第一个字符不能是代码块标记。"
+)
+
+_ARTICLE_USER_TMPL = """视频标题：{title}
+
+带时间戳的字幕转写（[分:秒] 为该句出现时间）：
+{transcript}
+{trunc_note}
+请基于以上转写写一篇总结文章，要求：
+1. 篇幅自适应内容量：信息少的短视频约 300-500 字，信息密集的长视频可写到 1000 字左右
+2. 开头 1-2 句话概括视频主旨；正文按内容逻辑分 2-5 个小节，用「## 小节标题」分隔
+3. 只允许使用三种 markdown 语法：## 小节标题、**加粗关键词**、- 列表项；禁止表格、代码块、链接和图片
+4. 内容必须来自转写，禁止编造；不要逐字复述字幕，要重新组织语言"""
+
+
+def _stream_chat(messages: list[dict], on_text) -> str:
+    """流式调用 LLM：每收到一段 delta 就回调 on_text(截至当前的完整文本)。
+
+    与 _chat 共用配置与瞬时错误重试策略；流式中断时整段重来（调用方会先
+    收到 on_text("") 复位），避免拼接出重复半截内容。
+    """
+    s = get_llm_settings()
+    payload = {
+        "model": s["LLM_MODEL"],
+        "messages": messages,
+        "temperature": 0.5,
+        "max_tokens": s["LLM_MAX_TOKENS"],
+        "stream": True,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    url = s["LLM_BASE_URL"].rstrip("/") + "/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + s["LLM_API_KEY"],
+        "Accept": "text/event-stream",
+    }
+    last_err = None
+    for attempt in range(LLM_ATTEMPTS):
+        chunks: list[str] = []
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=s["LLM_TIMEOUT_SECONDS"]) as resp:
+                for raw in resp:  # 按行读 SSE
+                    line = raw.decode("utf-8", "ignore").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        delta = (json.loads(data_str)["choices"][0]
+                                 .get("delta", {}).get("content"))
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+                    if delta:
+                        chunks.append(delta)
+                        on_text("".join(chunks))
+            text = "".join(chunks).strip()
+            if text:
+                return text
+            last_err = "文章内容为空"
+        except urllib.error.HTTPError as e:
+            detail = ""
+            try:
+                detail = json.loads(e.read().decode("utf-8", "ignore")).get("error", {}).get("message", "")
+            except Exception:
+                pass
+            last_err = f"HTTP {e.code}：{detail}"
+        except (http.client.HTTPException, urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            last_err = f"{type(e).__name__}：{e}"
+        on_text("")  # 复位视图后进入下一次尝试
+        if attempt < LLM_ATTEMPTS - 1:
+            time.sleep(1.5 * (attempt + 1))
+    raise BusinessError(f"AI 文章生成失败（{last_err}），已自动降级为章节要点拼接")
+
+
+def generate_article_stream(meta: dict, notify) -> str | None:
+    """阻塞函数（上层用 to_thread 调）。notify(完整文本) 全程回调；失败返回 None。"""
+    settings = get_llm_settings()  # 先校验 Key
+    transcript, truncated = build_transcript(meta["cues"])
+    messages = [
+        {"role": "system", "content": _ARTICLE_SYSTEM},
+        {"role": "user", "content": _ARTICLE_USER_TMPL.format(
+            title=meta["title"], transcript=transcript,
+            trunc_note="\n（注意：转写超长已截断，请仅基于给出的部分撰写）\n" if truncated else "",
+        )},
+    ]
+    try:
+        return _stream_chat(messages, notify)
+    except BusinessError:
+        notify("")
+        return None
+
+
+def degrade_article(title: str, summary: str, chapters: list[dict]) -> str:
+    """文章生成失败时的兜底：用摘要 + 章节要点拼一篇合规 markdown。"""
+    parts = [summary or title, ""]
+    for ch in chapters:
+        parts.append(f"## {ch['title']}")
+        for p in ch["points"]:
+            parts.append(f"- {p}")
+        parts.append("")
+    return "\n".join(parts).strip()
 
 
 # ---------- AI 问答 ----------

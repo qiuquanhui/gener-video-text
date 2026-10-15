@@ -438,6 +438,33 @@ body {
 .analysis-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
 .analysis-mindmap { grid-column: 1 / -1; }
 .analysis-mindmap .mindmap-wrap { max-height: 480px; }
+.mm-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- AI 总结文章（SSE 流式渲染） ---------- */
+.sum-section-title .article-streaming { color: var(--primary); font-size: 12px; margin-left: 8px; }
+.sum-section-title .article-degraded { color: var(--text-3); font-size: 12px; font-weight: 400; margin-left: 4px; }
+.article-md { padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: #FAFBFF; font-size: 14px; line-height: 1.85; color: var(--text); max-height: 420px; overflow-y: auto; }
+.article-md h4, .article-md h5, .article-md h6 { margin: 14px 0 6px; font-size: 15px; color: var(--primary-dark); }
+.article-md h4:first-child, .article-md p:first-child { margin-top: 0; }
+.article-md p { margin: 6px 0; }
+.article-md ul { margin: 6px 0; padding-left: 20px; }
+.article-md li { margin: 3px 0; }
+.article-md strong { color: var(--primary-dark); }
+
+/* ---------- 思维导图全屏覆盖层 ---------- */
+.mm-fullscreen { position: fixed; inset: 0; z-index: 1200; background: #fff; display: flex; flex-direction: column; animation: fadeIn .18s ease; }
+.mm-fs-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.mm-fs-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.mm-fs-title h3 { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
+.mm-fs-hint { color: var(--text-3); font-size: 12px; }
+.mm-fs-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.mm-stage { flex: 1; overflow: hidden; cursor: grab; touch-action: none; background:
+  radial-gradient(circle, #E5E9F2 1px, transparent 1px) 0 0 / 22px 22px, #FAFBFD; }
+.mm-stage:active { cursor: grabbing; }
+.mm-stage svg { display: block; }
+.mm-inline-actions { margin-left: auto; display: inline-flex; gap: 8px; }
+.sum-section-title { display: flex; align-items: center; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 768px) {
   .analysis-grid { grid-template-columns: 1fr; }
   .analysis-card { padding: 18px; }
