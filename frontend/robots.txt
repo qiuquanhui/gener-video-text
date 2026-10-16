@@ -1,0 +1,9 @@
+# 闪电下载 robots.txt
+# 上线时将下方 Sitemap 域名替换为真实域名（全局搜索 shandian-download.example.com）
+
+User-agent: *
+Allow: /
+# API 接口为动态 JSON，无需搜索引擎抓取
+Disallow: /api/
+
+Sitemap: https://shandian-download.example.com/sitemap.xml
