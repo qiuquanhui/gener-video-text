@@ -1,0 +1,29 @@
+# 闪电下载（万能视频下载器）
+
+> 闪电下载是一个免费在线万能视频下载与总结工具：粘贴视频链接即可下载哔哩哔哩、抖音、YouTube、快手等 1800+ 平台的视频（最高 4K、可提取 MP3），一键提取视频字幕转文字，并自动生成 AI 视频总结（摘要、时间戳章节、思维导图、总结文章与追问问答）。无需登录、不限次数、手机电脑浏览器直接使用，无需安装 App。
+
+站点首页：https://shandian-download.example.com/
+
+## 使用指南
+
+- [B站视频怎么下载到本地](https://shandian-download.example.com/guides/bilibili-video-download.html)：图文教程，覆盖高清/MP3/字幕下载与常见问题
+- [抖音视频怎么无水印保存](https://shandian-download.example.com/guides/douyin-no-watermark.html)：三步无水印下载教程，无需登录、不读 Cookie
+- [视频怎么转文字](https://shandian-download.example.com/guides/video-to-text.html)：字幕提取与无字幕视频的本机语音转写教程
+- [AI 视频总结怎么做](https://shandian-download.example.com/guides/ai-video-summary.html)：摘要、章节要点、思维导图与多轮追问的使用教程
+- [使用指南目录](https://shandian-download.example.com/guides/)：全部教程索引
+
+## 核心功能
+
+- 视频解析与下载：粘贴链接展示标题、封面、时长、UP主与可用清晰度（4K/2K/1080P/720P/480P/360P），服务器下载并自动合并为 MP4，附件式保存到本地
+- MP3 音频提取：仅需要音频时可直接提取为 MP3
+- 抖音免 Cookie 通道：视频页链接、v.douyin.com 分享短链、个人主页弹窗链接均可解析，无水印 720P + MP3，全程无需任何 Cookie
+- 文本提取：优先提取平台公开字幕（B 站走免 Cookie 直连接口秒级获取，含平台 AI 字幕），无字幕时回退本机 Whisper 语音转写（音频不上传），输出可复制、可下载 .txt 的纯文本
+- AI 视频总结：解析即自动生成摘要 + 关键词 + 流式总结文章（SSE）、带时间戳的章节要点、可折叠思维导图（支持 PNG 下载），并可基于视频内容多轮追问问答
+- 全端免费：下载与文本提取不限次数、不限清晰度、无需登录；AI 总结当前限时免费（每 IP 每分钟 3 次）
+
+## 使用须知
+
+- 隐私：不读取浏览器或本机 Cookie；语音转写在本地完成、音频不上传；AI 总结仅将字幕文本与视频标题发送给本项目配置的 AI 服务商
+- 文件保留：下载文件在服务器临时保留 2 小时后自动删除，请及时保存到本地
+- 平台限制：少数平台（如小红书）暂不支持；需要登录才能访问的内容（如 B 站部分 1080P+ 清晰度）匿名状态下无法获取
+- 免责声明：仅供个人学习交流使用，请尊重内容创作者版权

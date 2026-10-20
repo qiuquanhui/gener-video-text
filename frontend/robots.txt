@@ -6,4 +6,44 @@ Allow: /
 # API 接口为动态 JSON，无需搜索引擎抓取
 Disallow: /api/
 
+# --- GEO：显式欢迎主流 AI 爬虫（训练与检索均允许抓取公开页面） ---
+User-agent: GPTBot
+Allow: /
+Disallow: /api/
+
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /api/
+
+User-agent: ChatGPT-User
+Allow: /
+Disallow: /api/
+
+User-agent: ClaudeBot
+Allow: /
+Disallow: /api/
+
+User-agent: Claude-User
+Allow: /
+Disallow: /api/
+
+User-agent: PerplexityBot
+Allow: /
+Disallow: /api/
+
+User-agent: Perplexity-User
+Allow: /
+Disallow: /api/
+
+# 字节跳动（豆包 / 扣子等 AI 产品）
+User-agent: Bytespider
+Allow: /
+Disallow: /api/
+
+# Common Crawl（众多大模型的数据底料）
+User-agent: CCBot
+Allow: /
+Disallow: /api/
+
 Sitemap: https://shandian-download.example.com/sitemap.xml
+
