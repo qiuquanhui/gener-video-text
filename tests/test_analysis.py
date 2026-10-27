@@ -1,6 +1,7 @@
 """Run: python -m unittest discover -s tests -p 'test_*.py'. No network/LLM calls."""
 import asyncio
 import json
+import sqlite3
 import sys
 import threading
 import time
@@ -11,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 import analysis_api
+import db as app_db
 import main
 import summarizer
 from downloader import BusinessError
@@ -33,6 +35,13 @@ class AnalysisTests(unittest.IsolatedAsyncioTestCase):
         self.service = analysis_api.AnalysisService()
         self.rate = patch.object(summarizer, "check_rate_limit").start()
         patch.object(summarizer, "generate_article_stream", side_effect=fake_article).start()
+        # 本套件走真实 db（任务在内存，但 summarize 配额落库）：清空配额表，
+        # 否则 ip:test 的当日用量跨测试轮次累积，超限后用例 402 假失败
+        app_db.init_db()
+        conn = sqlite3.connect(app_db.DB_PATH)
+        conn.execute("DELETE FROM quota_usage")
+        conn.commit()
+        conn.close()
         self.addCleanup(patch.stopall)
 
     async def asyncTearDown(self):

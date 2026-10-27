@@ -61,9 +61,38 @@ def normalize_douyin_url(url: str) -> str | None:
 
 _ttwid_cache: tuple[str, float] | None = None
 
+# union register 接口：直接注册匿名 ttwid（机房 IP 下首页往往不下发 ttwid 时的兜底；
+# ttwid 为字节系设备级匿名 ID，非登录态，iesdouyin 分享通道接受它）
+TTWID_REGISTER_URL = "https://ttwid.bytedance.com/ttwid/union/register/"
+TTWID_REGISTER_BODY = json.dumps({
+    "region": "cn", "aid": 1768, "needFid": False, "service": "www.ixigua.com",
+    "migrate_info": {"ticket": "", "source": "node"},
+    "cbUrlProtocol": "https", "union": True,
+})
+
+
+def _ttwid_from_response_cookie(resp) -> str | None:
+    for cookie in resp.headers.get_all("Set-Cookie") or []:
+        m = re.search(r"(?:^|,\s*)ttwid=([^;]+)", cookie)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _register_ttwid() -> str:
+    req = urllib.request.Request(
+        TTWID_REGISTER_URL, data=TTWID_REGISTER_BODY.encode(), method="POST",
+        headers={"Content-Type": "application/json", "User-Agent": DESKTOP_UA},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        ttwid = _ttwid_from_response_cookie(resp)
+    if not ttwid:
+        raise OSError("register response has no ttwid")
+    return ttwid
+
 
 def _fetch_ttwid() -> str:
-    for method in ("HEAD", "GET", "HEAD"):
+    for method in ("HEAD", "GET"):
         try:
             conn = http.client.HTTPSConnection("www.douyin.com", timeout=10)
             conn.request(method, "/", headers={"User-Agent": DESKTOP_UA})
@@ -76,6 +105,21 @@ def _fetch_ttwid() -> str:
         except OSError:
             pass
         time.sleep(1)
+    try:  # 注册接口兜底（机房 IP 下首页通常拿不到）
+        return _register_ttwid()
+    except OSError:
+        pass
+    try:  # 最后再试一次首页（服务端策略波动）
+        conn = http.client.HTTPSConnection("www.douyin.com", timeout=10)
+        conn.request("GET", "/", headers={"User-Agent": DESKTOP_UA})
+        resp = conn.getresponse()
+        cookie = resp.getheader("Set-Cookie") or ""
+        conn.close()
+        m = re.search(r"(?:^|,\s*)ttwid=([^;]+)", cookie)
+        if m:
+            return m.group(1)
+    except OSError:
+        pass
     raise DouyinError("无法从抖音获取匿名访问凭证，请稍后重试")
 
 

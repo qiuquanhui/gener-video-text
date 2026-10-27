@@ -11,30 +11,52 @@ import re
 import secrets
 import shutil
 import sys
+import tempfile
 import time
+import urllib.request
 import uuid
 from pathlib import Path
 
 import config
+import bilibili_fp
+import bilibili_video
 import douyin
 
 YT_DLP = [sys.executable, "-m", "yt_dlp"]
 OUTPUT_TEMPLATE = str(config.DOWNLOAD_DIR / "%(id)s.%(ext)s")
 
-# B 站风控缓解：浏览器 UA + Referer + 伪 buvid3 Cookie（匿名即可拉取播放地址）
+# B 站风控缓解：浏览器 UA + Referer + buvid 指纹 Cookie。
+# 优先用官方指纹接口换取的真 buvid3/buvid4（机房 IP 必需，家宽可加成）；
+# 指纹接口不可用时退化为随机伪 buvid3（家宽下足够，原行为）。
+# Cookie 必须经 Netscape 格式文件传给 yt-dlp（域 .bilibili.com）：
+# --add-headers 方式的 Cookie 只作用于下载 URL 所属域，发往 api.bilibili.com
+# 的提取请求不带 Cookie，机房 IP 下必被 412。
 CHROME_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
              "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 FAKE_BUVID3 = "XY" + secrets.token_hex(16) + "infoc"
+BILI_COOKIE_FILE = Path(tempfile.gettempdir()) / "bili_fp_cookies.txt"
+
+
+def _write_bili_cookie_file(pairs: list[tuple[str, str]]) -> str:
+    """把指纹写成 Netscape cookie 文件（原子替换），返回路径。"""
+    lines = ["# Netscape HTTP Cookie File"]
+    for name, value in pairs:
+        lines.append(f".bilibili.com\tTRUE\t/\tFALSE\t2000000000\t{name}\t{value}")
+    tmp = BILI_COOKIE_FILE.with_suffix(".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tmp.replace(BILI_COOKIE_FILE)
+    return str(BILI_COOKIE_FILE)
 
 
 def browser_args(url: str) -> list:
-    """针对 B 站域名附加防风控请求头；其他站点保持 yt-dlp 默认行为。"""
+    """针对 B 站域名附加防风控参数；其他站点保持 yt-dlp 默认行为。"""
     if "bilibili.com" in url or "b23.tv" in url:
-        return [
-            "--user-agent", CHROME_UA,
-            "--referer", "https://www.bilibili.com/",
-            "--add-headers", f"Cookie: buvid3={FAKE_BUVID3}",
-        ]
+        pairs = bilibili_fp.cookie_pairs() or [("buvid3", FAKE_BUVID3)]
+        base = ["--user-agent", CHROME_UA, "--referer", "https://www.bilibili.com/"]
+        try:
+            return [*base, "--cookies", _write_bili_cookie_file(pairs)]
+        except OSError:  # 临时目录不可写等极端情况：退回请求头方式（家宽仍可用）
+            return [*base, "--add-headers", "Cookie: " + "; ".join(f"{k}={v}" for k, v in pairs)]
     return []
 
 
@@ -128,6 +150,12 @@ class DownloadService:
                 return await asyncio.to_thread(douyin.parse_info, url)
             except douyin.DouyinError as e:
                 raise BusinessError(str(e))
+        # B 站：纯 API 直连通道（机房 IP 下 yt-dlp 网页抓取被风控 412，API 稳定）
+        if bilibili_video.is_bilibili(url) or "b23.tv" in url:
+            try:
+                return await asyncio.to_thread(bilibili_video.parse_info, url)
+            except bilibili_video.BilibiliError as e:
+                raise BusinessError(str(e))
         proc = await asyncio.create_subprocess_exec(
             *YT_DLP, "-J", "--no-playlist", "--no-warnings",
             "--socket-timeout", "15", *browser_args(url), url,
@@ -206,12 +234,16 @@ class DownloadService:
         if len(self.tasks) >= config.MAX_TASKS:
             raise BusinessError("任务过多，请稍后再试")
         task_id = uuid.uuid4().hex[:12]
+        provider = ("douyin" if douyin.is_douyin(url)
+                    else "bilibili" if (bilibili_video.is_bilibili(url) or "b23.tv" in url)
+                    else None)
         task = {
             "id": task_id, "url": url, "quality": quality, "title": title,
             "status": "queued", "progress": 0.0, "speed": None, "eta": None,
             "filename": None, "filepath": None, "error": None,
             "created_at": time.time(),
-            "direct": douyin.is_douyin(url),  # 抖音分享流：直链媒体下载
+            "direct": provider is not None,  # 非 yt-dlp 通道（抖音分享流 / B 站 API 直连）
+            "provider": provider,
         }
         self.tasks[task_id] = task
         asyncio.create_task(self._run(task))
@@ -255,6 +287,9 @@ class DownloadService:
 
     async def _download(self, task: dict):
         task["status"] = "downloading"
+        if task.get("provider") == "bilibili":
+            await self._bilibili_download(task)
+            return
         # 视频（bv+ba 两段下载）按 2 段折算总进度；音频与直链按 1 段
         expected_frags = 1 if (task.get("direct") or task["quality"] == "mp3") else 2
         frag_index, last_pct = 1, 0.0
@@ -345,6 +380,112 @@ class DownloadService:
             filepath=str(fp), filename=fp.name,
             status="done", progress=100.0, speed=None, eta=None,
         )
+
+    # ---------- B 站 API 直连下载（urllib 拉流 + ffmpeg 本地合并） ----------
+
+    def _ffmpeg_args(self, task: dict, video_path: str | None, audio_path: str | None) -> list:
+        mp3 = task["quality"] == "mp3"
+        out = str(config.DOWNLOAD_DIR / f"{task['id']}.{'mp3' if mp3 else 'mp4'}")
+        args = ["ffmpeg", "-nostdin", "-loglevel", "error", "-y"]
+        if mp3:
+            args += ["-i", audio_path or video_path,
+                     "-vn", "-c:a", "libmp3lame", "-q:a", "0"]
+        elif audio_path:
+            args += ["-i", video_path, "-i", audio_path,
+                     "-map", "0:v", "-map", "1:a", "-c", "copy",
+                     "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart"]
+        else:  # durl 单 mp4
+            args += ["-i", video_path, "-c", "copy"]
+        args.append(out)
+        return args
+
+    @staticmethod
+    def _http_download(url: str, dest: Path, headers: dict, on_bytes) -> None:
+        """阻塞式 HTTP 下载（线程内跑）；socket 超时兜底防卡死。"""
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp, open(dest, "wb") as f:
+            total_len = int(resp.headers.get("Content-Length") or 0)
+            received = 0
+            while True:
+                chunk = resp.read(262144)
+                if not chunk:
+                    break
+                f.write(chunk)
+                received += len(chunk)
+                on_bytes(received, total_len)
+        if total_len and received != total_len:
+            raise OSError(f"下载不完整（{received}/{total_len}）")
+
+    async def _bilibili_download(self, task: dict):
+        headers = {"Referer": "https://www.bilibili.com/",
+                   "User-Agent": bilibili_video.UA}
+        try:
+            play = await asyncio.to_thread(
+                bilibili_video.fetch_play, task["url"], task["quality"])
+        except bilibili_video.BilibiliError as e:
+            task["status"], task["error"] = "error", str(e)
+            return
+
+        mp3 = task["quality"] == "mp3"
+        v_tmp = config.DOWNLOAD_DIR / f"{task['id']}.v.m4s"
+        a_tmp = config.DOWNLOAD_DIR / f"{task['id']}.a.m4s"
+        # 待下载分片：(临时文件, 候选 URL 列表)；mp3 只需音频流（durl 场景则拉整段 mp4）
+        parts = []
+        if not mp3:
+            parts.append((v_tmp, play["video"]))
+        if play["kind"] == "dash" and play["audio"]:
+            parts.append((a_tmp, play["audio"]))
+        elif mp3:  # durl 无独立音频：下载整段再提取
+            parts.append((v_tmp, play["video"]))
+
+        state = {"done_parts": 0, "frac": 0.0}
+
+        def on_bytes(received: int, total_len: int):
+            state["frac"] = min(received / total_len, 1.0) if total_len else (0.5 if received else 0.0)
+            task["progress"] = round((state["done_parts"] + state["frac"]) / len(parts) * 92, 1)
+
+        try:
+            for dest, candidates in parts:
+                ok = False
+                for url in candidates[:3]:  # 主 CDN 失败换备用源，至多 3 个
+                    try:
+                        await asyncio.to_thread(self._http_download, url, dest, headers, on_bytes)
+                        ok = dest.stat().st_size > 0
+                        if ok:
+                            break
+                    except OSError:
+                        dest.unlink(missing_ok=True)
+                if not ok:
+                    task["status"] = "error"
+                    task["error"] = "视频流下载失败，请重试或更换清晰度"
+                    return
+                state["done_parts"] += 1
+                state["frac"] = 0.0
+
+            task["status"] = "converting" if mp3 else "merging"
+            task["progress"] = 95.0
+            proc = await asyncio.create_subprocess_exec(
+                *self._ffmpeg_args(task,
+                                   str(v_tmp) if v_tmp.exists() else None,
+                                   str(a_tmp) if a_tmp.exists() else None),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                _, err = await asyncio.wait_for(proc.communicate(), timeout=600)
+            except asyncio.TimeoutError:
+                proc.kill()
+                err = b"merge timeout"
+            ext = "mp3" if mp3 else "mp4"
+            out = config.DOWNLOAD_DIR / f"{task['id']}.{ext}"
+            if proc.returncode == 0 and out.is_file():
+                task.update(filepath=str(out), filename=out.name,
+                            status="done", progress=100.0, speed=None, eta=None)
+            else:
+                task["status"] = "error"
+                task["error"] = f"合并失败：{err.decode('utf-8', 'ignore')[-200:]}"
+        finally:
+            v_tmp.unlink(missing_ok=True)
+            a_tmp.unlink(missing_ok=True)
 
     # ---------- 任务视图 ----------
 
