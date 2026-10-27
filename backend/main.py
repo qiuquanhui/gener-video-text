@@ -23,6 +23,13 @@ import summarize_api  # noqa: E402
 app.include_router(summarize_api.router)
 import analysis_api  # noqa: E402
 app.include_router(analysis_api.router)
+# 阶段 5 新增：邮箱账号 + AI 免费额度 + Stripe 会员支付
+import auth_api  # noqa: E402
+app.include_router(auth_api.router)
+import quota  # noqa: E402
+app.include_router(quota.router)
+import payments_api  # noqa: E402
+app.include_router(payments_api.router)
 
 
 class ParseRequest(BaseModel):

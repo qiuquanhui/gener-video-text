@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import config
+import quota
 import summarizer
 from downloader import BusinessError
 from subtitle_cues import extract_cues
@@ -192,6 +193,8 @@ service = AnalysisService()
 
 @router.post("/api/analyze")
 async def analyze(req: AnalysisRequest, request: Request):
+    if req.include_summary:   # 仅带 AI 总结的解析计额度；纯文本提取免费
+        quota.consume_ai_quota(request)
     return service.start(_validate_url(req.url), request.client.host if request.client else "unknown", req.include_summary)
 
 
@@ -202,11 +205,17 @@ async def analysis_status(task_id: str):
 
 @router.post("/api/analysis/{task_id}/retry")
 async def retry_analysis(task_id: str, request: Request):
+    task = service.tasks.get(task_id)
+    if task and task["summary_requested"] and task["status"] == "error":
+        quota.consume_ai_quota(request)   # 只有真正会重跑 AI 的重试才计额度
     return service.retry(task_id, request.client.host if request.client else "unknown")
 
 
 @router.post("/api/analysis/{task_id}/summarize")
 async def summarize_analysis(task_id: str, request: Request):
+    task = service.tasks.get(task_id)
+    if task and task["summary_status"] not in {"pending", "generating", "done"}:
+        quota.consume_ai_quota(request)   # 幂等点击（已在生成/已生成）不重复计额度
     return service.request_summary(task_id, request.client.host if request.client else "unknown")
 
 

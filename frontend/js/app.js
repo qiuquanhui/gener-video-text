@@ -28,11 +28,11 @@ const app = createApp({
     ];
     const faqs = [
       { q: "支持哪些平台？", a: "基于 yt-dlp 开源引擎，支持哔哩哔哩、抖音、快手、微博、YouTube、Instagram、TikTok 等 1800+ 网站；少数平台（如小红书）暂不支持。" },
-      { q: "真的是完全免费吗？", a: "是。视频下载与文本提取不限次数、不限清晰度、无需登录；AI 总结与 AI 问答当前限时免费开放（每分钟 3 次）。" },
+      { q: "真的是完全免费吗？", a: "视频下载与文本提取不限次数、不限清晰度、永久免费；AI 总结与 AI 问答每日 3 次免费额度，登录后额度跨设备同步，开通会员（¥9.9/30 天）即可不限次使用。" },
       { q: "下载的文件会保存多久？", a: "文件在服务器临时保留 2 小时后自动删除，请下载完成后及时保存到本地设备。" },
       { q: "为什么提取不到 B 站字幕？", a: "本工具为了保护隐私，不读取浏览器或本机 Cookie。只有平台公开可访问的字幕能直接提取；若该视频字幕要求登录，目前无法提取。使用 AI 总结时，字幕文本和视频标题会发送给本项目配置的 AI 服务商。" },
       { q: "手机上怎么保存视频？", a: "点击\"保存文件\"后浏览器会直接下载；iOS 可在\"文件\"App 中查看，安卓在下载目录查看，也可保存到相册。" },
-      { q: "如何开通会员？", a: "当前为模拟支付阶段：点击定价区\"立即开通会员\"，模拟支付成功或输入激活码（如 VIP2026）即可体验会员流程，正式支付将在后续版本接入。" },
+      { q: "如何开通会员？", a: "点击定价区\"立即开通会员\"，通过 Stripe 安全收银台支付 ¥9.9 即可开通 30 天会员（支持 Visa / Mastercard 等国际卡组，一次买断不自动续费）；没有外币卡时可联系管理员获取兑换码（如 VIP2026）开通。" },
     ];
 
     /* ---------- 状态 ---------- */
@@ -62,11 +62,19 @@ const app = createApp({
     let parsedInput = "";
 
     const showPayModal = ref(false);
-    const payTab = ref("wechat");
+    const checkoutLoading = ref(false);
     const vipCode = ref("");
-    // 阶段 4 将迁移到后端校验（/api/vip/activate），当前与 config.VIP_CODES 保持一致
-    const VIP_CODES = ["VIP2026", "DOWN8888"];
-    const isVip = ref(localStorage.getItem("sd_vip") === "1");
+    const activateLoading = ref(false);
+    // 账号体系（阶段 5）：会员态以服务端为准（/api/auth/me），不再本地伪造
+    const me = ref(null);
+    const isVip = ref(false);
+    const showAuthModal = ref(false);
+    const authTab = ref("login");
+    const authForm = reactive({ email: "", password: "" });
+    const authLoading = ref(false);
+    let pendingPayAfterLogin = false;
+    // AI 免费额度（/api/quota）：mode = "" 未加载 | anonymous | account | vip
+    const quota = reactive({ mode: "", logged_in: false, limit: 3, used: 0, remaining: 3 });
 
     const toasts = reactive([]);
     let toastId = 0;
@@ -227,23 +235,116 @@ const app = createApp({
       URL.revokeObjectURL(a.href);
     }
 
-    /* ---------- 会员（模拟） ---------- */
+    /* ---------- 会员（Stripe 真实支付）与账号 ---------- */
     function openPay() { showPayModal.value = true; }
-    function mockPaySuccess() {
-      isVip.value = true;
-      localStorage.setItem("sd_vip", "1");
-      showPayModal.value = false;
-      toast("模拟支付成功，已开通会员 👑", "success");
+    function openAuth(tab = "login") {
+      authTab.value = tab;
+      showAuthModal.value = true;
     }
-    function activateVip() {
+    function applyAccount(account) {
+      me.value = account || null;
+      isVip.value = !!(account && account.is_vip);
+    }
+    async function refreshAuthState() {
+      try {
+        const d = await api("/api/auth/me");
+        applyAccount(d.logged_in ? d.account : null);
+      } catch { /* 网络异常时保持现状 */ }
+    }
+    async function refreshQuota() {
+      try { Object.assign(quota, await api("/api/quota")); } catch { /* 保持上次值 */ }
+    }
+    async function logout() {
+      try { await api("/api/auth/logout", {}); } catch { /* 忽略 */ }
+      applyAccount(null);
+      refreshQuota();
+      toast("已退出登录");
+    }
+    async function submitAuth() {
+      const email = authForm.email.trim();
+      const password = authForm.password;
+      if (!email || !password) { toast("请输入邮箱和密码", "error"); return; }
+      authLoading.value = true;
+      try {
+        const path = authTab.value === "register" ? "/api/auth/register" : "/api/auth/login";
+        const r = await api(path, { email, password });
+        applyAccount(r.account);
+        showAuthModal.value = false;
+        authForm.password = "";
+        toast(authTab.value === "register" ? "注册成功，已自动登录" : "登录成功，欢迎回来 👋", "success");
+        refreshQuota();
+        if (pendingPayAfterLogin) {
+          pendingPayAfterLogin = false;
+          startCheckout();
+        }
+      } catch (e) {
+        toast(e.message, "error");
+      } finally {
+        authLoading.value = false;
+      }
+    }
+    async function startCheckout() {
+      if (!me.value) {
+        pendingPayAfterLogin = true;
+        openAuth("login");
+        toast("请先登录，登录后继续支付", "info");
+        return;
+      }
+      if (checkoutLoading.value) return;
+      checkoutLoading.value = true;
+      try {
+        const r = await api("/api/vip/checkout", { plan_id: "monthly" });
+        if (r.checkout_url) window.location.href = r.checkout_url;   // 跳转 Stripe 托管收银台
+        else throw new Error("收银台链接创建失败，请稍后重试");
+      } catch (e) {
+        toast(e.message, "error");
+        checkoutLoading.value = false;
+      }
+    }
+    async function activateVip() {
       const code = vipCode.value.trim();
-      if (!code) { toast("请输入激活码", "error"); return; }
-      if (!VIP_CODES.includes(code.toUpperCase())) { toast("激活码无效", "error"); return; }
-      isVip.value = true;
-      localStorage.setItem("sd_vip", "1");
-      showPayModal.value = false;
-      vipCode.value = "";
-      toast("激活成功，欢迎加入会员 👑", "success");
+      if (!code) { toast("请输入兑换码", "error"); return; }
+      if (!me.value) {
+        pendingPayAfterLogin = false;
+        openAuth("login");
+        toast("请先登录后再兑换会员", "info");
+        return;
+      }
+      if (activateLoading.value) return;
+      activateLoading.value = true;
+      try {
+        const r = await api("/api/vip/activate", { code });
+        applyAccount(r.account);
+        showPayModal.value = false;
+        vipCode.value = "";
+        refreshQuota();
+        toast("兑换成功，欢迎加入会员 👑", "success");
+      } catch (e) {
+        toast(e.message, "error");
+      } finally {
+        activateLoading.value = false;
+      }
+    }
+
+    /* ---------- AI 免费额度：402 拦截与展示 ---------- */
+    function isQuotaError(e) { return !!e && e.status === 402; }
+    function handleQuotaExceeded(e) {
+      toast(e.message, "error");
+      refreshQuota();
+      if (me.value) openPay();               // 已登录还超限 → 引导开通会员
+      else openAuth("login");                // 匿名超限 → 引导登录
+    }
+    function quotaText() {
+      if (isVip.value || quota.mode === "vip") return "👑 会员·AI 不限次";
+      if (quota.mode === "account") return `今日剩余 ${quota.remaining} 次`;
+      if (quota.mode === "anonymous") return `免费剩余 ${quota.remaining}/${quota.limit} 次`;
+      return "";
+    }
+    // 本地乐观计数：AI 请求被接受后扣减展示值（服务端为准，402/刷新时校正）
+    function noteAiUsage() {
+      if (isVip.value || quota.mode === "vip") return;
+      if (typeof quota.remaining === "number" && quota.remaining > 0) quota.remaining -= 1;
+      if (typeof quota.used === "number") quota.used += 1;
     }
     function onSummarizeClick() { return doSummarize(); }
 
@@ -462,10 +563,13 @@ const app = createApp({
       try {
         const task = await api("/api/analyze", { url: u, include_summary: includeSummary });
         if (version !== analysisVersion) return;
+        if (includeSummary) noteAiUsage();
         applyAnalysis(task);
         if (!["done", "error"].includes(task.status)) scheduleAnalysisPoll(version, task.task_id);
       } catch (e) {
-        if (version === analysisVersion) failAnalysis(e.message);
+        if (version !== analysisVersion) return;
+        failAnalysis(e.message);
+        if (isQuotaError(e)) handleQuotaExceeded(e);
       }
     }
 
@@ -480,12 +584,16 @@ const app = createApp({
       try {
         const task = await api(`/api/analysis/${analysis.taskId}/retry`, {});
         if (version !== analysisVersion) return;
+        if (analysis.summaryRequested) noteAiUsage();
         applyAnalysis(task);
         if (!["done", "error"].includes(task.status)) scheduleAnalysisPoll(version, task.task_id);
       } catch (e) {
         if (version !== analysisVersion) return;
         if (e.status === 404) await startAnalysis(analysis.url, version, analysis.summaryRequested);
-        else failAnalysis(e.message);
+        else {
+          failAnalysis(e.message);
+          if (isQuotaError(e)) handleQuotaExceeded(e);
+        }
       }
     }
 
@@ -506,12 +614,16 @@ const app = createApp({
           try {
             const task = await api(`/api/analysis/${analysis.taskId}/summarize`, {});
             if (version !== analysisVersion) return;
+            noteAiUsage();
             applyAnalysis(task);
             if (!["done", "error"].includes(task.status)) scheduleAnalysisPoll(version, task.task_id);
           } catch (e) {
             if (version !== analysisVersion) return;
             if (e.status === 404) await startAnalysis(u, version, true);
-            else failAnalysis(e.message);
+            else {
+              failAnalysis(e.message);
+              if (isQuotaError(e)) handleQuotaExceeded(e);
+            }
           }
         } else {
           await startAnalysis(u, analysisVersion, true);
@@ -705,10 +817,12 @@ const app = createApp({
         const history = qaMessages.slice(0, -1).slice(-6).map(m => ({ role: m.role, content: m.content }));
         const r = await api("/api/qa", { session_id: sumResult.sessionId, question: q, history });
         if (version !== analysisVersion) return;
+        noteAiUsage();
         qaMessages.push({ role: "assistant", content: r.answer });
       } catch (e) {
         if (version !== analysisVersion) return;
         qaMessages.push({ role: "assistant", content: "⚠ " + e.message });
+        if (isQuotaError(e)) handleQuotaExceeded(e);
       } finally {
         if (version === analysisVersion) qaLoading.value = false;
         setTimeout(() => {
@@ -777,13 +891,21 @@ const app = createApp({
       URL.revokeObjectURL(a.href);
     }
 
+    // 启动初始化：拉取登录态与 AI 额度（仅浏览器环境执行；Node 测试沙箱无 window，跳过）
+    if (typeof window !== "undefined") {
+      refreshAuthState();
+      refreshQuota();
+    }
+
     return {
       platforms, features, faqs,
       url, parsing, videoInfo, selectedQuality, resultSection, openFaq,
       dl, textLoading, textResult, analysis, retryAnalysis,
-      showPayModal, payTab, vipCode, isVip, toasts,
+      showPayModal, vipCode, isVip, me, toasts,
+      showAuthModal, authTab, authForm, authLoading, checkoutLoading, activateLoading,
+      quota, quotaText,
       parseVideo, startDownload, resetDownload, extractText, copyText, downloadTxt,
-      openPay, mockPaySuccess, activateVip, onSummarizeClick,
+      openPay, openAuth, submitAuth, logout, startCheckout, activateVip, onSummarizeClick,
       sumLoading, sumResult, mm, qaMessages, qaInput, qaLoading,
       activeTab, spStatusText, spStatusClass,
       renderArticle, copyArticle, downloadArticle,

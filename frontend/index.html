@@ -86,7 +86,7 @@
       {
         "@type": "Question",
         "name": "真的是完全免费吗？",
-        "acceptedAnswer": { "@type": "Answer", "text": "是。视频下载与文本提取不限次数、不限清晰度、无需登录；AI 总结与 AI 问答当前限时免费开放（每分钟 3 次）。" }
+        "acceptedAnswer": { "@type": "Answer", "text": "视频下载与文本提取不限次数、不限清晰度、永久免费；AI 总结与 AI 问答每日 3 次免费额度，登录后额度跨设备同步，开通会员（¥9.9/30 天）即可不限次使用。" }
       },
       {
         "@type": "Question",
@@ -106,7 +106,7 @@
       {
         "@type": "Question",
         "name": "如何开通会员？",
-        "acceptedAnswer": { "@type": "Answer", "text": "当前为模拟支付阶段：点击定价区\"立即开通会员\"，模拟支付成功或输入激活码（如 VIP2026）即可体验会员流程，正式支付将在后续版本接入。" }
+        "acceptedAnswer": { "@type": "Answer", "text": "点击定价区\"立即开通会员\"，通过 Stripe 安全收银台支付 ¥9.9 即可开通 30 天会员（支持 Visa / Mastercard 等国际卡组，一次买断不自动续费）；没有外币卡时可联系管理员获取兑换码（如 VIP2026）开通。" }
       }
     ]
   }
@@ -131,8 +131,18 @@
         <a href="#pricing">定价</a>
         <a href="#faq">常见问题</a>
       </nav>
-      <button class="btn btn-outline btn-sm nav-vip" v-if="!isVip" @click="openPay">🔓 解锁会员</button>
-      <span class="vip-badge-nav" v-else>👑 会员</span>
+      <template v-if="me">
+        <span class="vip-badge-nav" v-if="isVip">👑 会员</span>
+        <button class="btn btn-primary btn-sm nav-vip" v-else @click="openPay">🔓 开通会员</button>
+        <div class="nav-user">
+          <span class="nav-email" :title="me.email">{{ me.email }}</span>
+          <button class="btn btn-ghost btn-sm" @click="logout">退出</button>
+        </div>
+      </template>
+      <template v-else>
+        <button class="btn btn-primary btn-sm nav-vip" @click="openPay">🔓 开通会员</button>
+        <button class="btn btn-outline btn-sm" @click="openAuth('login')">登录 / 注册</button>
+      </template>
     </div>
   </header>
 
@@ -242,6 +252,7 @@
             <div class="sp-head-title">
               <h3>✨ AI 视频总结</h3>
               <span class="sp-status" :class="spStatusClass()">{{ spStatusText() }}</span>
+              <span class="quota-chip" :class="{vip: isVip}" v-if="quotaText()">{{ quotaText() }}</span>
             </div>
             <button v-if="analysis.status === 'error'" class="btn btn-outline btn-sm" @click="retryAnalysis" :disabled="textLoading || sumLoading">
               {{ textResult.text ? '重试 AI 总结' : '重试提取' }}
@@ -408,7 +419,7 @@
               <li>✓ 不限次数、不限清晰度</li>
               <li>✓ MP3 音频提取</li>
               <li>✓ 字幕文本提取</li>
-              <li>✓ AI 总结 + AI 问答（限时免费）</li>
+              <li>✓ AI 总结 + AI 问答（每日 3 次免费）</li>
               <li>✓ 手机 / 电脑全端使用</li>
             </ul>
             <button class="btn btn-outline btn-block" @click="scrollTo('#home')">立即使用</button>
@@ -416,13 +427,13 @@
           <div class="card pricing-card plan-vip">
             <span class="plan-badge">👑 最受欢迎</span>
             <h3 class="plan-name">会员版</h3>
-            <div class="plan-price"><b>¥9.9</b><span>/月</span></div>
+            <div class="plan-price"><b>¥9.9</b><span>/ 30 天</span></div>
             <ul class="plan-list">
               <li>✓ 包含全部免费功能</li>
-              <li class="vip-item">✨ 未来 AI 高级能力优先体验</li>
+              <li class="vip-item">✨ AI 总结 / 文章 / 导图 / 问答 不限次</li>
+              <li>✓ 额度跨设备同步，一次买断不自动续费</li>
               <li>✓ 未来新功能优先体验</li>
               <li>✓ 专属客服支持</li>
-              <li class="muted">✗ 更多权益持续加入</li>
             </ul>
             <button class="btn btn-primary btn-block" @click="openPay">立即开通会员</button>
           </div>
@@ -456,7 +467,7 @@
     </div>
   </footer>
 
-  <!-- ═══════════ 模拟支付弹窗 ═══════════ -->
+  <!-- ═══════════ 会员支付弹窗（Stripe 托管收银台） ═══════════ -->
   <div class="modal-mask" v-if="showPayModal" @click.self="showPayModal = false">
     <div class="modal pay-modal">
       <div class="modal-head">
@@ -464,21 +475,56 @@
         <button class="modal-close" @click="showPayModal = false">✕</button>
       </div>
       <div class="modal-body">
-        <div class="pay-tabs">
-          <button :class="{active: payTab === 'wechat'}" @click="payTab = 'wechat'">💬 微信支付</button>
-          <button :class="{active: payTab === 'alipay'}" @click="payTab = 'alipay'">🅰️ 支付宝</button>
+        <div class="pay-plan">
+          <div class="pay-plan-name">会员月卡</div>
+          <div class="pay-amount"><b>¥9.9</b><span>/ 30 天</span></div>
+          <ul class="pay-plan-list">
+            <li>✨ AI 总结 / 文章 / 导图 / 问答<b>不限次</b>（免费每日 3 次）</li>
+            <li>✓ 含全部免费功能：下载、文本提取永久免费</li>
+            <li>✓ 一次买断 30 天，到期不自动续费</li>
+          </ul>
         </div>
-        <div class="pay-amount">会员月卡 <b>¥9.9</b></div>
-        <div class="qr-placeholder" :class="payTab">
-          <div class="qr-pattern"></div>
-          <span>{{ payTab === 'wechat' ? '微信' : '支付宝' }}扫码二维码（演示）</span>
-        </div>
-        <button class="btn btn-primary btn-block" @click="mockPaySuccess">✔ 模拟支付成功，立即开通</button>
-        <div class="pay-divider"><span>或使用激活码</span></div>
+        <button class="btn btn-primary btn-block" @click="startCheckout" :disabled="checkoutLoading">
+          <span v-if="!checkoutLoading">💳 前往支付（Stripe 安全收银台）</span>
+          <span v-else class="loading-dot"><i></i><i></i><i></i></span>
+        </button>
+        <p class="pay-note">支付由 Stripe 处理，本站不接触你的银行卡信息；支持 Visa / Mastercard 等国际卡组</p>
+        <div class="pay-divider"><span>或使用兑换码</span></div>
         <div class="code-row">
-          <input v-model="vipCode" type="text" placeholder="请输入激活码，如 VIP2026">
-          <button class="btn btn-outline" @click="activateVip">激活</button>
+          <input v-model="vipCode" type="text" placeholder="兑换码，如 VIP2026（每账号限一次）">
+          <button class="btn btn-outline" @click="activateVip" :disabled="activateLoading">兑换</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 登录 / 注册弹窗 ═══════════ -->
+  <div class="modal-mask" v-if="showAuthModal" @click.self="showAuthModal = false">
+    <div class="modal auth-modal">
+      <div class="modal-head">
+        <h3>{{ authTab === 'login' ? '👋 欢迎回来' : '🆕 创建账号' }}</h3>
+        <button class="modal-close" @click="showAuthModal = false">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="pay-tabs auth-tabs">
+          <button :class="{active: authTab === 'login'}" @click="authTab = 'login'">登录</button>
+          <button :class="{active: authTab === 'register'}" @click="authTab = 'register'">注册</button>
+        </div>
+        <form class="auth-form" @submit.prevent="submitAuth">
+          <label>邮箱
+            <input v-model="authForm.email" type="email" placeholder="you@example.com" autocomplete="email" required>
+          </label>
+          <label>密码
+            <input v-model="authForm.password" type="password"
+                   :placeholder="authTab === 'register' ? '设置密码（至少 8 位）' : '请输入密码'"
+                   :autocomplete="authTab === 'register' ? 'new-password' : 'current-password'">
+          </label>
+          <button class="btn btn-primary btn-block" type="submit" :disabled="authLoading">
+            <span v-if="!authLoading">{{ authTab === 'login' ? '登录' : '注册并登录' }}</span>
+            <span v-else class="loading-dot"><i></i><i></i><i></i></span>
+          </button>
+        </form>
+        <p class="auth-hint">💡 下载与文本提取无需登录；登录用于同步 AI 免费额度与会员权益，邮箱+密码即可，无需验证手机号。</p>
       </div>
     </div>
   </div>
@@ -551,7 +597,7 @@
       <dt style="font-weight:700;margin-top:14px;">支持哪些平台？</dt>
       <dd style="margin:4px 0 0;">基于 yt-dlp 开源引擎，支持哔哩哔哩、抖音、快手、微博、YouTube、Instagram、TikTok 等 1800+ 网站；少数平台（如小红书）暂不支持。</dd>
       <dt style="font-weight:700;margin-top:14px;">真的是完全免费吗？</dt>
-      <dd style="margin:4px 0 0;">是。视频下载与文本提取不限次数、不限清晰度、无需登录；AI 总结与 AI 问答当前限时免费开放（每分钟 3 次）。</dd>
+      <dd style="margin:4px 0 0;">视频下载与文本提取不限次数、不限清晰度、永久免费；AI 总结与 AI 问答每日 3 次免费额度，登录后额度跨设备同步，开通会员（¥9.9/30 天）即可不限次使用。</dd>
       <dt style="font-weight:700;margin-top:14px;">下载的文件会保存多久？</dt>
       <dd style="margin:4px 0 0;">文件在服务器临时保留 2 小时后自动删除，请下载完成后及时保存到本地设备。</dd>
       <dt style="font-weight:700;margin-top:14px;">为什么提取不到 B 站字幕？</dt>
@@ -559,7 +605,7 @@
       <dt style="font-weight:700;margin-top:14px;">手机上怎么保存视频？</dt>
       <dd style="margin:4px 0 0;">点击"保存文件"后浏览器会直接下载；iOS 可在"文件"App 中查看，安卓在下载目录查看，也可保存到相册。</dd>
       <dt style="font-weight:700;margin-top:14px;">如何开通会员？</dt>
-      <dd style="margin:4px 0 0;">当前为模拟支付阶段：点击定价区"立即开通会员"，模拟支付成功或输入激活码（如 VIP2026）即可体验会员流程，正式支付将在后续版本接入。</dd>
+      <dd style="margin:4px 0 0;">点击定价区"立即开通会员"，通过 Stripe 安全收银台支付 ¥9.9 即可开通 30 天会员（支持 Visa / Mastercard 等国际卡组，一次买断不自动续费）；没有外币卡时可联系管理员获取兑换码（如 VIP2026）开通。</dd>
     </dl>
     <p style="margin:32px 0 0;color:#9CA3AF;font-size:13px;">⚡ 闪电下载 © 2026 · 基于 yt-dlp 开源项目 · 仅供个人学习交流使用，请尊重原作者版权 · <a href="/guides/" style="color:#2563EB;">使用指南</a></p>
   </div>

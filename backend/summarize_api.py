@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 import douyin
+import quota
 import summarizer
 from downloader import BusinessError
 from subtitle_cues import extract_cues
@@ -39,6 +40,7 @@ def _validate_url(url: str) -> str:
 @router.post("/api/summarize")
 async def summarize_api(req: SummarizeRequest, request: Request):
     summarizer.check_rate_limit(request.client.host if request.client else "unknown")
+    quota.consume_ai_quota(request)                # 免费 3 次/天（会员不限），超限 402
     url = _validate_url(req.url)
     meta = await extract_cues(url)          # 字幕提取（异步子进程）
     result = await asyncio.to_thread(summarizer.summarize, meta)  # LLM 调用（阻塞→线程）
@@ -48,6 +50,7 @@ async def summarize_api(req: SummarizeRequest, request: Request):
 @router.post("/api/qa")
 async def qa_api(req: QARequest, request: Request):
     summarizer.check_rate_limit(request.client.host if request.client else "unknown")
+    quota.consume_ai_quota(request)                # 每轮追问计 1 次
     return await asyncio.to_thread(
         summarizer.answer_question, req.session_id, req.question, req.history
     )

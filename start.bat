@@ -31,7 +31,7 @@ if not exist ".venv\Scripts\python.exe" (
     )
 )
 
-".venv\Scripts\python.exe" -c "import fastapi, uvicorn, yt_dlp" >nul 2>nul
+".venv\Scripts\python.exe" -c "import fastapi, uvicorn, yt_dlp, stripe" >nul 2>nul
 if errorlevel 1 (
     echo [初始化] 首次运行：安装依赖 ...
     ".venv\Scripts\python.exe" -m pip install -r requirements.txt

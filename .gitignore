@@ -1,3 +1,7 @@
+# 本地凭据便签（含服务器密码，绝不入库）
+ems.txt
+.env
+
 # Python
 .venv/
 __pycache__/
@@ -6,6 +10,9 @@ __pycache__/
 # 运行时产物（临时下载文件）；保留 .gitkeep 维持目录
 downloads/*
 !downloads/.gitkeep
+
+# 本地数据库（阶段5：账号/订单/额度，含用户隐私，绝不入库）
+data/*
 
 # 其他
 .DS_Store

@@ -317,29 +317,23 @@ body {
   max-height: 46vh; overflow-y: auto; color: #374151;
 }
 
-/* 模拟支付 */
+/* 会员支付（Stripe）与登录注册 */
 .pay-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
 .pay-tabs button {
   border: 1.5px solid var(--border); background: #fff; border-radius: 10px;
   padding: 11px; font-size: 14.5px; font-weight: 600; color: var(--text-2); cursor: pointer; transition: all .15s;
 }
 .pay-tabs button.active { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
-.pay-amount { text-align: center; font-size: 14.5px; color: var(--text-2); margin-bottom: 14px; }
-.pay-amount b { color: var(--primary); font-size: 26px; margin-left: 6px; }
-.qr-placeholder {
-  width: 190px; height: 190px; margin: 0 auto 18px; border-radius: 12px;
-  border: 1.5px dashed var(--border); position: relative; overflow: hidden;
-  display: flex; align-items: flex-end; justify-content: center;
+.pay-plan {
+  border: 1.5px solid var(--border); border-radius: 12px; padding: 18px;
+  margin-bottom: 16px; background: #F9FAFB;
 }
-.qr-placeholder span { position: relative; z-index: 2; font-size: 11.5px; color: var(--text-3); background: #fff; padding: 2px 8px; border-radius: 4px; margin-bottom: 10px; }
-.qr-pattern {
-  position: absolute; inset: 14px; border-radius: 6px; opacity: .8;
-  background-image:
-    repeating-linear-gradient(0deg, #111827 0 6px, transparent 6px 12px),
-    repeating-linear-gradient(90deg, #111827 0 6px, transparent 6px 12px);
-  background-size: 24px 24px, 32px 32px;
-}
-.qr-placeholder.alipay .qr-pattern { opacity: .65; }
+.pay-plan-name { font-size: 14px; font-weight: 700; color: var(--text-2); margin-bottom: 4px; }
+.pay-amount { font-size: 14.5px; color: var(--text-2); }
+.pay-amount b { color: var(--primary); font-size: 26px; margin-right: 6px; }
+.pay-plan-list { margin: 14px 0 0; padding: 0; list-style: none; font-size: 13.5px; color: var(--text-2); line-height: 2; }
+.pay-plan-list b { color: var(--primary-dark); }
+.pay-note { font-size: 12px; color: var(--text-3); text-align: center; margin: 10px 0 0; line-height: 1.6; }
 .pay-divider { display: flex; align-items: center; gap: 12px; margin: 18px 0 14px; color: var(--text-3); font-size: 12.5px; }
 .pay-divider::before, .pay-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .code-row { display: flex; gap: 10px; }
@@ -348,6 +342,27 @@ body {
   padding: 11px 14px; font-size: 14px; outline: none; min-width: 0;
 }
 .code-row input:focus { border-color: var(--primary); }
+
+.auth-form { display: flex; flex-direction: column; gap: 14px; }
+.auth-form label { font-size: 13px; font-weight: 600; color: var(--text-2); display: flex; flex-direction: column; gap: 6px; }
+.auth-form input {
+  border: 1.5px solid var(--border); border-radius: 10px; padding: 11px 14px;
+  font-size: 14px; outline: none; font-weight: 400;
+}
+.auth-form input:focus { border-color: var(--primary); }
+.auth-hint { font-size: 12px; color: var(--text-3); margin: 14px 0 0; line-height: 1.7; }
+
+/* 导航栏账号区与 AI 额度徽标 */
+.nav-user { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.nav-email {
+  max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; color: var(--text-2);
+}
+.quota-chip {
+  font-size: 12px; font-weight: 600; color: var(--primary-dark); background: var(--primary-light);
+  border-radius: 999px; padding: 3px 10px; white-space: nowrap;
+}
+.quota-chip.vip { color: #B45309; background: #FEF3C7; }
 
 /* ═══════════ Toast ═══════════ */
 .toast-wrap { position: fixed; top: 80px; left: 50%; transform: translateX(-50%); z-index: 300; display: flex; flex-direction: column; gap: 10px; align-items: center; }

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, follow">
+  <title>支付结果确认中 - 闪电下载</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #F5F7FA; color: #111827; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    .card {
+      background: #fff; border-radius: 16px; box-shadow: 0 10px 40px rgba(37, 99, 235, .08);
+      max-width: 460px; width: 100%; padding: 40px 32px; text-align: center;
+    }
+    .icon { font-size: 46px; margin-bottom: 14px; }
+    h1 { font-size: 21px; margin-bottom: 10px; }
+    p { font-size: 14px; color: #6B7280; line-height: 1.8; }
+    .code-box {
+      margin: 18px 0; background: #EFF6FF; border: 1px dashed #93C5FD; border-radius: 10px;
+      padding: 14px; font-size: 17px; font-weight: 700; letter-spacing: 1px; color: #1D4ED8;
+      user-select: all; word-break: break-all;
+    }
+    .code-box small { display: block; font-size: 12px; font-weight: 400; color: #6B7280; margin-top: 6px; letter-spacing: 0; }
+    .btn {
+      display: inline-block; margin-top: 18px; padding: 12px 34px; border-radius: 10px;
+      font-size: 15px; font-weight: 600; cursor: pointer; border: none; text-decoration: none;
+    }
+    .btn-primary { background: #2563EB; color: #fff; }
+    .btn-primary:hover { background: #1D4ED8; }
+    .btn-ghost { background: none; border: 1.5px solid #E5E7EB; color: #6B7280; margin-left: 10px; }
+    .spinner {
+      width: 36px; height: 36px; margin: 0 auto 16px; border-radius: 50%;
+      border: 3px solid #DBEAFE; border-top-color: #2563EB; animation: spin .9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #detail { margin-top: 10px; font-size: 12.5px; color: #9CA3AF; }
+  </style>
+</head>
+<body>
+  <div class="card" id="app">
+    <div class="spinner" id="icon"></div>
+    <h1 id="title">正在确认支付结果…</h1>
+    <p id="desc">支付成功后 Stripe 会通知服务器开通会员，通常几秒内完成，请稍候。</p>
+    <div id="extra"></div>
+    <div>
+      <a class="btn btn-primary" id="primary-btn" href="/" style="display:none">返回首页</a>
+      <button class="btn btn-ghost" id="retry-btn" style="display:none" onclick="location.reload()">再刷新一次</button>
+    </div>
+    <p id="detail"></p>
+  </div>
+  <script>
+    // 支付回跳页：轮询订单状态；webhook 未送达时后端会主动向 Stripe 核实（双保险）
+    var params = new URLSearchParams(location.search);
+    var orderId = params.get("order") || "";
+    var MAX_TRIES = 15, tries = 0, timer = null;
+
+    function $(id) { return document.getElementById(id); }
+    function setState(icon, title, desc) {
+      $("icon").className = "icon"; $("icon").textContent = icon;
+      $("title").textContent = title; $("desc").textContent = desc;
+    }
+    function finishOk(order) {
+      if (timer) clearInterval(timer);
+      var until = order.account && order.account.vip_expires_at
+        ? new Date(order.account.vip_expires_at * 1000).toLocaleString("zh-CN", { hour12: false }) : "";
+      setState("🎉", "会员开通成功！", "会员有效期至：" + until + "；AI 总结与问答已不限次。");
+      var html = "";
+      if (order.activation_code) {
+        html += '<div class="code-box">' + order.activation_code +
+                '<small>备用兑换码：换设备或清空浏览器后，登录任意账号输入即可找回会员</small></div>';
+      }
+      $("extra").innerHTML = html;
+      $("primary-btn").style.display = "";
+      $("retry-btn").style.display = "none";
+    }
+    function finishPending() {
+      if (timer) clearInterval(timer);
+      setState("⏳", "支付确认中", "服务器还没收到 Stripe 的支付通知。别担心——如果扣款成功，几分钟内会员会自动开通；长时间未开通可凭支付凭证联系管理员。");
+      $("retry-btn").style.display = "";
+      $("primary-btn").style.display = "";
+      $("detail").textContent = "订单号：" + orderId;
+    }
+    function poll() {
+      fetch("/api/vip/order/" + encodeURIComponent(orderId), { headers: { "Content-Type": "application/json" } })
+        .then(function (r) { return r.json().then(function (d) { return { status: r.status, body: d }; }); })
+        .then(function (res) {
+          if (res.status === 401) {
+            if (timer) clearInterval(timer);
+            setState("🔑", "请先登录", "需要登录购买会员时的账号才能查看订单。");
+            $("primary-btn").textContent = "去首页登录"; $("primary-btn").style.display = "";
+            return;
+          }
+          if (res.status === 404) {
+            if (timer) clearInterval(timer);
+            setState("🤔", "订单不存在", "没有找到这笔订单，可能链接已失效。");
+            $("primary-btn").style.display = "";
+            return;
+          }
+          if (res.body && res.body.status === "paid") { finishOk(res.body); return; }
+          if (++tries >= MAX_TRIES) finishPending();
+        })
+        .catch(function () { if (++tries >= MAX_TRIES) finishPending(); });
+    }
+    if (!orderId) {
+      setState("🤔", "缺少订单参数", "回跳链接不完整，请从首页重新发起支付。");
+      $("primary-btn").style.display = "";
+    } else {
+      timer = setInterval(poll, 2000);
+      poll();
+    }
+  </script>
+</body>
+</html>
