@@ -150,6 +150,7 @@ node --test tests/test_frontend.js
 - 文本链路不读取浏览器 Cookie；B 站优先免 Cookie 直连取平台字幕，失败回退 yt-dlp 公开字幕，再回退本机 Whisper（需自装 `openai-whisper` + PyTorch，音频不上传）；无法匿名获取音频的视频仍不可提取
 - 抖音免 Cookie 通道为无水印 720P 单一清晰度 + MP3，暂不支持多清晰度；抖音无字幕接口，文本提取需等二期转写
 - 小红书等少数平台暂不支持；YouTube 等境外平台需服务器网络可达
+- **机房 IP 风控**：国内大平台（B 站 412、抖音匿名凭证拒绝）会拦截云服务器 IP 段的匿名解析，家宽出口正常；生产部署需自备住宅代理出口或在平台风控较松的时段/线路使用（详见 `docs/部署指南.md`）
 - 使用 AI 时，字幕文本与视频标题会发送给所配置的 LLM 服务商；分析任务与问答会话存于进程内存，重启后丢失
 - 账号为邮箱+密码（无邮箱验证，找回密码需管理员清库）；匿名 AI 额度按 IP 记，代理可绕过；退款未自动回收会员，需人工处理
 - 上线前需替换 `frontend/index.html` 等处的占位域名（见 `docs/SEO 优化说明.md`），全站 HTTPS 后打开会话 Cookie `secure` 标记
@@ -164,6 +165,7 @@ node --test tests/test_frontend.js
 | `docs/方案设计-AI视频总结.md` / `docs/视频总结功能总结.md` | 分步任务架构、隐私边界与最终形态、15 项回归验证 |
 | `docs/竞品调研-AI视频总结.md` | BibiGPT / NoteGPT 竞品调研与商业化参照 |
 | `docs/Stripe接入指南.md` | **手把手**：测试账户→密钥→CLI→webhook→测试卡全流程与 FAQ |
+| `docs/部署指南.md` | Linux 服务器上线全流程：环境/systemd/nginx/验收清单/机房 IP 风控说明与运维 |
 | `docs/方案设计-会员支付.md` | 阶段 5 设计：账号/额度/支付 ADR、契约、幂等与安全设计（含测试映射） |
 | `docs/SEO 优化说明.md` / `docs/GEO 优化说明.md` | TDK/OG/JSON-LD/robots/sitemap 与 llms.txt/教程落地页改造记录 |
 
