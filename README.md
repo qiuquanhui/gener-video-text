@@ -63,7 +63,7 @@ STRIPE_WEBHOOK_SECRET = "whsec_..."      # stripe listen 转发或 Dashboard 获
 | 分步内容分析 | **解析即总结**：视频信息与 AI 总结同屏分栏，右栏 5 Tab 切换（总结/章节/导图/文本/问答），失败可重试 | ✅ |
 | AI 总结 + 问答 | 摘要 / 时间戳章节要点 / 关键词 / 思维导图（全屏、拖拽缩放、PNG 下载）/ **流式总结文章（SSE 逐段渲染，可下载 .md）**，多轮追问 | ✅ |
 | 账号与额度 | 邮箱账号体系（核心下载/提取免登录，超 AI 额度或购买时才登录）；免费 AI 额度每日 3 次（匿名按 IP / 登录按账号），会员不限次 | ✅ |
-| 会员 · Stripe 支付 | **Stripe 托管收银台** ¥9.9 买断 30 天（不自动续费）；webhook 验签 + 事件去重 + 订单状态机幂等履约；兑换码 VIP2026/DOWN8888（服务端校验，每账号一次，无 Stripe 时可演示会员） | ✅ |
+| 会员 · Stripe 支付 | **Stripe 托管收银台** ¥9.9 买断 30 天（不自动续费）；webhook 验签 + 事件去重 + 订单状态机幂等履约；兑换码机制保留（订单码全局单次有效；平台演示码默认下线，可用环境变量 `VIP_CODES` 按需开启） | ✅ |
 | SEO / GEO | TDK / OG / JSON-LD（含 FAQPage）/ robots / sitemap / llms.txt / `/guides/` 教程落地页 | ✅ |
 
 ## 架构
@@ -129,7 +129,7 @@ node --test tests/test_frontend.js
 | `FREE_AI_PER_DAY` | `3` | 免费用户每日 AI 次数（环境变量可调） |
 | `SESSION_TTL_SECONDS` | 30 天 | 登录会话有效期 |
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:8000` | 支付回跳地址，部署时改为公网域名 |
-| `VIP_CODES` | `VIP2026` / `DOWN8888` | 演示兑换码（每账号一次，各送 30 天） |
+| `VIP_CODES` | 空（关闭） | 平台演示兑换码开关；环境变量 `VIP_CODES=A,B` 启用（每账号一次，各送 30 天），生产保持关闭 |
 | `ASR_PYTHON` / `ASR_MODEL` | 系统 Python / `base` | 本机 Whisper 转写的解释器与模型 |
 
 ## API 概览

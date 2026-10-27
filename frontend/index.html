@@ -106,7 +106,7 @@
       {
         "@type": "Question",
         "name": "如何开通会员？",
-        "acceptedAnswer": { "@type": "Answer", "text": "点击定价区\"立即开通会员\"，通过 Stripe 安全收银台支付 ¥9.9 即可开通 30 天会员（支持 Visa / Mastercard 等国际卡组，一次买断不自动续费）；没有外币卡时可联系管理员获取兑换码（如 VIP2026）开通。" }
+        "acceptedAnswer": { "@type": "Answer", "text": "点击定价区\"立即开通会员\"，通过 Stripe 安全收银台支付 ¥9.9 即可开通 30 天会员（支持 Visa / Mastercard 等国际卡组，一次买断不自动续费）；没有外币卡时可联系管理员获取兑换码开通。" }
       }
     ]
   }
@@ -491,7 +491,7 @@
         <p class="pay-note">支付由 Stripe 处理，本站不接触你的银行卡信息；支持 Visa / Mastercard 等国际卡组</p>
         <div class="pay-divider"><span>或使用兑换码</span></div>
         <div class="code-row">
-          <input v-model="vipCode" type="text" placeholder="兑换码，如 VIP2026（每账号限一次）">
+          <input v-model="vipCode" type="text" placeholder="兑换码（每账号限一次）">
           <button class="btn btn-outline" @click="activateVip" :disabled="activateLoading">兑换</button>
         </div>
       </div>
@@ -605,7 +605,7 @@
       <dt style="font-weight:700;margin-top:14px;">手机上怎么保存视频？</dt>
       <dd style="margin:4px 0 0;">点击"保存文件"后浏览器会直接下载；iOS 可在"文件"App 中查看，安卓在下载目录查看，也可保存到相册。</dd>
       <dt style="font-weight:700;margin-top:14px;">如何开通会员？</dt>
-      <dd style="margin:4px 0 0;">点击定价区"立即开通会员"，通过 Stripe 安全收银台支付 ¥9.9 即可开通 30 天会员（支持 Visa / Mastercard 等国际卡组，一次买断不自动续费）；没有外币卡时可联系管理员获取兑换码（如 VIP2026）开通。</dd>
+      <dd style="margin:4px 0 0;">点击定价区"立即开通会员"，通过 Stripe 安全收银台支付 ¥9.9 即可开通 30 天会员（支持 Visa / Mastercard 等国际卡组，一次买断不自动续费）；没有外币卡时可联系管理员获取兑换码开通。</dd>
     </dl>
     <p style="margin:32px 0 0;color:#9CA3AF;font-size:13px;">⚡ 闪电下载 © 2026 · 基于 yt-dlp 开源项目 · 仅供个人学习交流使用，请尊重原作者版权 · <a href="/guides/" style="color:#2563EB;">使用指南</a></p>
   </div>

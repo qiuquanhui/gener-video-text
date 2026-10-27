@@ -159,8 +159,10 @@ stripe events resend evt_xxxxxxxxx
 `test_duplicate_webhook_delivery_extends_only_once` 保证这一点）。
 
 ### Q4：没有 Stripe 账号 / 完全无外网，怎么演示会员功能？
-用平台演示兑换码：登录后点「开通会员」→ 兑换码输入 `VIP2026`（或 `DOWN8888`），
-每账号限兑一次、各送 30 天会员——这是服务端校验的真实会员态，不是前端模拟。
+演示兑换码默认关闭（生产安全）。本地开发先设置环境变量再启动服务：
+`VIP_CODES=VIP2026,DOWN8888`（Windows cmd：`set VIP_CODES=...`），
+登录后点「开通会员」→ 兑换码输入 `VIP2026`，每账号限兑一次、送 30 天会员——
+这是服务端校验的真实会员态，不是前端模拟。
 
 ### Q5：怎么清空测试数据从头再来？
 停掉服务，删除 `data/app.db*` 三个文件（SQLite 库+WAL），重启即可。

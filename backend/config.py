@@ -37,8 +37,9 @@ PLANS = {
     },
 }
 
-# 会员模拟流程的激活码（现为服务端校验的平台演示兑换码：每账号限兑一次，各送 30 天）
-VIP_CODES = {"VIP2026", "DOWN8888"}
+# 平台演示兑换码：默认关闭（生产环境不启用，公开仓库不含任何可用兑换码）。
+# 本地开发/演示可用环境变量 VIP_CODES=A,B 临时开启；正式兑换码由订单履约生成（全局单次有效）。
+VIP_CODES = {c.strip().upper() for c in os.getenv("VIP_CODES", "").split(",") if c.strip()}
 
 # LLM（OpenAI 兼容协议）；实际配置由 llm_config 加载，无 Key 时 AI 报错并保留已提取文本。
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")

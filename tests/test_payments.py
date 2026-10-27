@@ -60,6 +60,8 @@ class PaymentsTestCase(unittest.IsolatedAsyncioTestCase):
         settings = {"secret_key": SECRET_KEY, "webhook_secret": WEBHOOK_SECRET}
         patch.object(stripe_config, "get_stripe_settings", return_value=settings).start()
         patch.object(stripe_config, "stripe_enabled", return_value=True).start()
+        # 生产默认关闭演示码（config.VIP_CODES 默认空），测试内显式开启以覆盖兑换路径
+        patch.object(config, "VIP_CODES", {"VIP2026"}).start()
         self.jar = CookieJar()
         status, _, _ = await request(main.app, "POST", "/api/auth/register",
                                      {"email": "buyer@test.com", "password": "password123"},
